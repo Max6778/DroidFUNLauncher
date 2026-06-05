@@ -53,6 +53,7 @@ public final class StorageLocationStore {
     private static final String JSON_ID = "id";
     private static final String JSON_NAME = "name";
     private static final String JSON_URI = "uri";
+    private static final String METADATA_RESTORE_MARKER = ".scoped_storage_metadata_loaded";
 
     private StorageLocationStore() {
     }
@@ -256,6 +257,51 @@ public final class StorageLocationStore {
     }
 
     /**
+     * MainActivity should not crawl a SAF tree on every resume/selection. A metadata
+     * restore is only needed when the selected mirror has no launcher metadata yet.
+     */
+    public static boolean needsSelectedTreeMetadataRestoreForAdapter(@NonNull Context context) {
+        Context appContext = context.getApplicationContext();
+        if (!isSelectedScopedStorage(appContext)) return false;
+
+        File launcherHome = getSelectedLauncherHome(appContext);
+        File minecraftHome = new File(launcherHome, ".minecraft");
+        if (new File(launcherHome, METADATA_RESTORE_MARKER).isFile()
+                || new File(minecraftHome, METADATA_RESTORE_MARKER).isFile()) {
+            return false;
+        }
+
+        return !hasAnyInstanceMetadata(new File(minecraftHome, "instances"))
+                && !hasAnyVersionMetadata(new File(minecraftHome, "versions"));
+    }
+
+    /**
+     * Opening details should be instant. If this returns true, callers can hydrate
+     * the one instance folder in the background, not before navigation.
+     */
+    public static boolean needsSelectedLocalPathRestoreForDetails(
+            @NonNull Context context,
+            @Nullable File localPath
+    ) {
+        Context appContext = context.getApplicationContext();
+        if (localPath == null || !isSelectedScopedStorage(appContext)) return false;
+
+        File target;
+        try {
+            target = localPath.getCanonicalFile();
+        } catch (Throwable ignored) {
+            target = localPath.getAbsoluteFile();
+        }
+
+        if (!target.isDirectory()) return true;
+        if (new File(target, "instance.json").isFile()
+                && new File(new File(target, "game"), "options.txt").isFile()) {
+            return false;
+        }
+        return false;
+    }
+
+    /**
      * Returns the actual local File root used by installers and the JVM. For SAF
      * locations this is an app-private mirror, not Android/data pretending to be
      * the user's selected folder.
@@ -371,6 +417,7 @@ public final class StorageLocationStore {
 
         File localRoot = getSelectedLocalRootForTree(appContext, treeUri);
         SafMinecraftMirror.copyTreeMetadataToLocalLauncherHome(appContext, treeUri, localRoot, progress);
+        markMetadataRestoreChecked(localRoot);
     }
 
     /**
@@ -643,6 +690,43 @@ public final class StorageLocationStore {
             return launcherHome.equals(mirrorRoot) || isChildOf(mirrorRoot, launcherHome);
         } catch (Throwable throwable) {
             return false;
+        }
+    }
+
+    private static boolean hasAnyInstanceMetadata(@NonNull File instancesRoot) {
+        File[] children = instancesRoot.listFiles();
+        if (children == null) return false;
+        for (File child : children) {
+            if (child == null || !child.isDirectory()) continue;
+            if (child.getName().startsWith(".pending_delete")) continue;
+            if (new File(child, "instance.json").isFile()) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasAnyVersionMetadata(@NonNull File versionsRoot) {
+        File[] children = versionsRoot.listFiles();
+        if (children == null) return false;
+        for (File child : children) {
+            if (child == null || !child.isDirectory()) continue;
+            String id = child.getName();
+            if (id.startsWith(".pending_delete")) continue;
+            if (new File(child, id + ".json").isFile()) return true;
+        }
+        return false;
+    }
+
+    private static void markMetadataRestoreChecked(@NonNull File localRoot) {
+        try {
+            if (!localRoot.exists() && !localRoot.mkdirs()) return;
+            File marker = new File(localRoot, METADATA_RESTORE_MARKER);
+            if (!marker.exists()) {
+                try (FileOutputStream output = new FileOutputStream(marker, false)) {
+                    output.write('1');
+                }
+            }
+        } catch (Throwable throwable) {
+            Logging.i(TAG, "Unable to write scoped metadata marker: " + throwable.getMessage());
         }
     }
 

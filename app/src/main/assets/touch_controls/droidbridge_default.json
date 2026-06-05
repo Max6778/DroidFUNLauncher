@@ -1,8 +1,11 @@
 {
   "format": "JavaLauncherTouchControls",
-  "version": 1,
+  "version": 3,
   "name": "Imported Pojav\/Zalith Controls",
   "preferredScale": 100,
+  "coordinateUnit": "px",
+  "sourceWidth": 854,
+  "sourceHeight": 480,
   "controls": [
     {
       "id": "626e3655-af4e-456e-8cc8-1b70c9754d9a",
@@ -11,6 +14,12 @@
       "keyCode": 32,
       "keyCodes": [
         32
+      ],
+      "keySlots": [
+        32,
+        0,
+        0,
+        0
       ],
       "mouseButton": 0,
       "scrollY": 0,
@@ -27,6 +36,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": true,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -38,9 +48,15 @@
       "keyCodes": [
         32
       ],
+      "keySlots": [
+        32,
+        0,
+        0,
+        0
+      ],
       "mouseButton": 0,
       "scrollY": 0,
-      "x": 673,
+      "x": 774,
       "y": 0,
       "width": 80,
       "height": 30,
@@ -53,16 +69,23 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": true,
+      "visibleWhenControlsHidden": true,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
     {
-      "id": "ed0b4d97-bdf8-4e1a-8e4f-e037ad932ab5",
+      "id": "Left Mouse Click",
       "label": "PRI",
       "action": "mouse",
       "keyCode": 32,
       "keyCodes": [
         32
+      ],
+      "keySlots": [
+        32,
+        0,
+        0,
+        0
       ],
       "mouseButton": 0,
       "scrollY": 0,
@@ -79,6 +102,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": true,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -89,6 +113,12 @@
       "keyCode": 32,
       "keyCodes": [
         32
+      ],
+      "keySlots": [
+        32,
+        0,
+        0,
+        0
       ],
       "mouseButton": 1,
       "scrollY": 0,
@@ -105,6 +135,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": true,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -116,9 +147,15 @@
       "keyCodes": [
         32
       ],
+      "keySlots": [
+        32,
+        0,
+        0,
+        0
+      ],
       "mouseButton": 0,
       "scrollY": 0,
-      "x": 753,
+      "x": 694,
       "y": 0,
       "width": 80,
       "height": 30,
@@ -131,6 +168,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": true,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -140,6 +178,9 @@
       "action": "key",
       "keyCode": 292,
       "keyCodes": [
+        292
+      ],
+      "keySlots": [
         292,
         0,
         0,
@@ -160,6 +201,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": true,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -169,6 +211,9 @@
       "action": "key",
       "keyCode": 84,
       "keyCodes": [
+        84
+      ],
+      "keySlots": [
         84,
         0,
         0,
@@ -189,6 +234,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": true,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -198,6 +244,9 @@
       "action": "key",
       "keyCode": 294,
       "keyCodes": [
+        294
+      ],
+      "keySlots": [
         294,
         0,
         0,
@@ -218,6 +267,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": true,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -227,6 +277,9 @@
       "action": "key",
       "keyCode": 258,
       "keyCodes": [
+        258
+      ],
+      "keySlots": [
         258,
         0,
         0,
@@ -247,6 +300,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": true,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -256,6 +310,9 @@
       "action": "key",
       "keyCode": 87,
       "keyCodes": [
+        87
+      ],
+      "keySlots": [
         87,
         0,
         0,
@@ -276,6 +333,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": false,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -285,6 +343,9 @@
       "action": "key",
       "keyCode": 83,
       "keyCodes": [
+        83
+      ],
+      "keySlots": [
         83,
         0,
         0,
@@ -305,6 +366,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": false,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -314,6 +376,9 @@
       "action": "key",
       "keyCode": 68,
       "keyCodes": [
+        68
+      ],
+      "keySlots": [
         68,
         0,
         0,
@@ -334,6 +399,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": false,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -342,7 +408,8 @@
       "label": "Button",
       "action": "key",
       "keyCode": 0,
-      "keyCodes": [
+      "keyCodes": [],
+      "keySlots": [
         0,
         0,
         0,
@@ -363,6 +430,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": false,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -372,6 +440,9 @@
       "action": "key",
       "keyCode": 32,
       "keyCodes": [
+        32
+      ],
+      "keySlots": [
         32,
         0,
         0,
@@ -392,6 +463,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": true,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -402,6 +474,10 @@
       "keyCode": 65,
       "keyCodes": [
         65,
+        87
+      ],
+      "keySlots": [
+        65,
         87,
         0,
         0
@@ -421,6 +497,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": false,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -430,6 +507,10 @@
       "action": "key",
       "keyCode": 87,
       "keyCodes": [
+        87,
+        68
+      ],
+      "keySlots": [
         87,
         68,
         0,
@@ -450,6 +531,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": false,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -459,6 +541,10 @@
       "action": "key",
       "keyCode": 68,
       "keyCodes": [
+        68,
+        83
+      ],
+      "keySlots": [
         68,
         83,
         0,
@@ -479,6 +565,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": false,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -488,6 +575,10 @@
       "action": "key",
       "keyCode": 83,
       "keyCodes": [
+        83,
+        65
+      ],
+      "keySlots": [
         83,
         65,
         0,
@@ -508,6 +599,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": false,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -517,6 +609,9 @@
       "action": "key",
       "keyCode": 256,
       "keyCodes": [
+        256
+      ],
+      "keySlots": [
         256,
         0,
         0,
@@ -537,6 +632,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": true,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -546,6 +642,9 @@
       "action": "key",
       "keyCode": 65,
       "keyCodes": [
+        65
+      ],
+      "keySlots": [
         65,
         0,
         0,
@@ -566,6 +665,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": false,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -575,6 +675,9 @@
       "action": "key",
       "keyCode": 340,
       "keyCodes": [
+        340
+      ],
+      "keySlots": [
         340,
         0,
         0,
@@ -595,6 +698,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": true,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -604,6 +708,9 @@
       "action": "key",
       "keyCode": 69,
       "keyCodes": [
+        69
+      ],
+      "keySlots": [
         69,
         0,
         0,
@@ -611,19 +718,20 @@
       ],
       "mouseButton": 0,
       "scrollY": 0,
-      "x": 14.959348678588867,
-      "y": 119.69105529785156,
+      "x": 15,
+      "y": 120,
       "width": 50,
       "height": 50,
       "sizePercent": 100,
       "opacity": 1,
       "cornerRadius": 5,
-      "strokeWidth": 0,
+      "strokeWidth": 1,
       "strokeColor": -1,
       "backgroundColor": 1291845632,
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": false,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -633,6 +741,9 @@
       "action": "key",
       "keyCode": 341,
       "keyCodes": [
+        341
+      ],
+      "keySlots": [
         341,
         0,
         0,
@@ -653,6 +764,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": true,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -662,6 +774,9 @@
       "action": "key",
       "keyCode": 342,
       "keyCodes": [
+        342
+      ],
+      "keySlots": [
         342,
         0,
         0,
@@ -682,6 +797,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": true,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -693,10 +809,16 @@
       "keyCodes": [
         32
       ],
+      "keySlots": [
+        32,
+        0,
+        0,
+        0
+      ],
       "mouseButton": 0,
       "scrollY": 1,
       "x": 783,
-      "y": 30,
+      "y": 50,
       "width": 50,
       "height": 50,
       "sizePercent": 100,
@@ -708,6 +830,7 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": true,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     },
@@ -719,10 +842,16 @@
       "keyCodes": [
         32
       ],
+      "keySlots": [
+        32,
+        0,
+        0,
+        0
+      ],
       "mouseButton": 0,
       "scrollY": -1,
       "x": 783,
-      "y": 90,
+      "y": 120,
       "width": 50,
       "height": 50,
       "sizePercent": 100,
@@ -734,6 +863,40 @@
       "toggle": false,
       "visibleInGame": true,
       "visibleInMenu": true,
+      "visibleWhenControlsHidden": false,
+      "joystickAbsolute": false,
+      "joystickForwardLock": false
+    },
+    {
+      "id": "20a67961-8f94-4a2a-beb7-be63bf396f88",
+      "label": "Key Sender",
+      "action": "key_sender_keyboard",
+      "keyCode": 32,
+      "keyCodes": [
+        32
+      ],
+      "keySlots": [
+        32,
+        0,
+        0,
+        0
+      ],
+      "mouseButton": 0,
+      "scrollY": 0,
+      "x": 252.4519805908203,
+      "y": 0,
+      "width": 72,
+      "height": 52,
+      "sizePercent": 100,
+      "opacity": 0.7200000286102295,
+      "cornerRadius": 16,
+      "strokeWidth": 1,
+      "strokeColor": -1711276033,
+      "backgroundColor": 1711276032,
+      "toggle": false,
+      "visibleInGame": true,
+      "visibleInMenu": true,
+      "visibleWhenControlsHidden": false,
       "joystickAbsolute": false,
       "joystickForwardLock": false
     }

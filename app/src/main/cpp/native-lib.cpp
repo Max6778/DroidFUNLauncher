@@ -201,7 +201,7 @@ Java_ca_dnamobile_javalauncher_launcher_NativeLauncherBridge_nativeLaunchJvm(
         setenv("POJAV_NATIVEDIR", appNativeDir.c_str(), 1);
     }
 
-    // Match Zalith's launcher-side preloads as closely as possible.
+    // Preloads libraries properly in order
     preloadOptionalFromDirs(nativeSearchDirs, {
             "libpojavexec.so",
             "libpojavexec_awt.so",

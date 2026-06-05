@@ -20,6 +20,7 @@ import androidx.annotation.Nullable;
 
 public final class GameOverlayPreferences {
     private static final String PREFS_NAME = "game_overlay_preferences";
+    private static final boolean DEFAULT_SHOW_GAME_FPS_COUNTER = true;
 
     private static final String KEY_SHOW_GAME_FPS_COUNTER = "show_game_fps_counter";
     private static final String KEY_GAME_SETTINGS_BUTTON_PLACEMENT = "game_settings_button_placement";
@@ -55,7 +56,7 @@ public final class GameOverlayPreferences {
     }
 
     public static boolean isShowGameFpsCounter(@NonNull Context context) {
-        return prefs(context).getBoolean(KEY_SHOW_GAME_FPS_COUNTER, false);
+        return prefs(context).getBoolean(KEY_SHOW_GAME_FPS_COUNTER, DEFAULT_SHOW_GAME_FPS_COUNTER);
     }
 
     public static void setShowGameFpsCounter(@NonNull Context context, boolean enabled) {

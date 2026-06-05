@@ -19,6 +19,7 @@ package net.kdt.pojavlaunch;
 
 import android.content.Context;
 import android.graphics.SurfaceTexture;
+import android.graphics.PixelFormat;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -41,6 +42,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import ca.dnamobile.javalauncher.settings.LauncherPreferences;
+import ca.dnamobile.javalauncher.renderer.DroidBridgeMesaSupport;
 import ca.dnamobile.javalauncher.controls.TouchHotbarHitbox;
 import ca.dnamobile.javalauncher.controls.ControlsPreferences;
 import ca.dnamobile.javalauncher.input.GamepadMappingStore;
@@ -140,15 +142,80 @@ public class MinecraftGLSurface extends FrameLayout implements GrabListener {
         requestFocus();
     }
 
+
+    private boolean shouldForceZinkNativeSurfaceRgba8888() {
+        if (DroidBridgeMesaSupport.shouldForceNativeSurfaceRgba8888()) return true;
+
+        // v57 fallback: in some launch flows the renderer env is finalized after the
+        // Java renderer object is selected, so the static flag can be missed. Check
+        // the live process env as well. This keeps the display-path workaround active
+        // for both the real Vulkan Zink option and the old Freedreno alias.
+        return envContains("POJAV_RENDERER", "vulkan_zink")
+                || envContains("LIB_MESA_NAME", "libosmesa_8.so")
+                || envContains("POJAVEXEC_EGL", "libosmesa_8.so")
+                || envEquals("DROIDBRIDGE_ADRENO740_SURFACE_RGBA8888", "1")
+                || envEquals("DROIDBRIDGE_ZINK_V57_FORCE_OSMESA_EGL", "1")
+                || envEquals("DROIDBRIDGE_FREEDRENO_V57_PURE_ZINK_ALIAS", "1");
+    }
+
+
+    private boolean shouldForceDirectFreedrenoOpaqueRgbx8888() {
+        // v69: do not force RGBX just because direct Freedreno is selected.
+        // Mojo's working path lets Mesa/Android choose the visual. Only force RGBX
+        // when an explicit debug flag asks for it.
+        return envEquals("DROIDBRIDGE_DIRECT_FREEDRENO_OPAQUE_RGBX8888", "1")
+                || envEquals("DROIDBRIDGE_EGL_FORCE_RGBX8888", "1");
+    }
+
+    private boolean shouldForceDirectFreedrenoNativeSurface() {
+        // v70: do not force SurfaceView for the Mojo-style direct KGSL path.
+        // Mojo's OpenJDK/Cacio route is closer to DroidBridge's TextureView path than
+        // to the forced native SurfaceView path, and the remaining Adreno 740 issue is
+        // visual corruption rather than a context failure. Keep an explicit escape hatch.
+        return envEquals("DROIDBRIDGE_DIRECT_FREEDRENO_NATIVE_SURFACE_V69", "1")
+                && !envEquals("DROIDBRIDGE_DIRECT_FREEDRENO_TEXTUREVIEW_V70", "1");
+    }
+
+    private static boolean envContains(String key, String needle) {
+        try {
+            String value = System.getenv(key);
+            return value != null && value.toLowerCase(java.util.Locale.ROOT).contains(needle);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static boolean envEquals(String key, String expected) {
+        try {
+            String value = System.getenv(key);
+            return expected.equals(value);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     public void start(boolean isAlreadyRunning) {
         if (renderView != null) return;
 
         renderingStarted = false;
         boolean useNativeSurfaceView = LauncherPreferences.isUseNativeSurfaceView(getContext());
+        if (shouldForceDirectFreedrenoOpaqueRgbx8888()) {
+            useNativeSurfaceView = true;
+            Log.i("ResolutionScale", "v69 forcing native SurfaceView RGBX_8888/opaque for explicit direct Freedreno debug flag");
+        } else if (shouldForceDirectFreedrenoNativeSurface()) {
+            useNativeSurfaceView = true;
+            Log.i("ResolutionScale", "v69 forcing native SurfaceView for direct Freedreno Mojo KGSL path without forcing holder pixel format");
+        } else if (shouldForceZinkNativeSurfaceRgba8888()) {
+            useNativeSurfaceView = true;
+            Log.i("ResolutionScale", "v59 forcing native SurfaceView RGBA_8888 for Vulkan Zink / legacy Freedreno alias");
+        }
 
         if (useNativeSurfaceView) {
             startNativeSurfaceView(isAlreadyRunning);
         } else {
+            if (envEquals("DROIDBRIDGE_DIRECT_FREEDRENO_TEXTUREVIEW_V70", "1")) {
+                Log.i("ResolutionScale", "v70 using TextureView path for direct Freedreno Mojo KGSL visual test");
+            }
             startTextureView(isAlreadyRunning);
         }
     }
@@ -209,6 +276,17 @@ public class MinecraftGLSurface extends FrameLayout implements GrabListener {
     private void startNativeSurfaceView(boolean isAlreadyRunning) {
         nativeSurfaceView = new SurfaceView(getContext());
         renderView = nativeSurfaceView;
+
+        try {
+            if (shouldForceDirectFreedrenoOpaqueRgbx8888()) {
+                nativeSurfaceView.getHolder().setFormat(PixelFormat.RGBX_8888);
+                Log.i("ResolutionScale", "v69 SurfaceView holder format forced to RGBX_8888/opaque by explicit debug flag");
+            } else if (shouldForceZinkNativeSurfaceRgba8888()) {
+                nativeSurfaceView.getHolder().setFormat(PixelFormat.RGBA_8888);
+                Log.i("ResolutionScale", "v59 SurfaceView holder format forced to RGBA_8888 for Vulkan Zink / legacy Freedreno alias");
+            }
+        } catch (Throwable ignored) {
+        }
 
         nativeSurfaceView.setFocusable(false);
         nativeSurfaceView.setZOrderOnTop(false);
@@ -1293,6 +1371,15 @@ public class MinecraftGLSurface extends FrameLayout implements GrabListener {
         CallbackBridge.sendMouseButton(button, status);
     }
 
+    private void recenterMouse(boolean sendToMinecraft) {
+        CallbackBridge.setInputReady(true);
+        CallbackBridge.mouseX = Math.max(1, CallbackBridge.windowWidth) / 2f;
+        CallbackBridge.mouseY = Math.max(1, CallbackBridge.windowHeight) / 2f;
+        if (sendToMinecraft) {
+            CallbackBridge.sendCursorPos(CallbackBridge.mouseX, CallbackBridge.mouseY);
+        }
+    }
+
     private void requestFocusIfNeeded() {
         if (!hasFocus()) requestFocus();
     }
@@ -1302,18 +1389,18 @@ public class MinecraftGLSurface extends FrameLayout implements GrabListener {
         grabbed = isGrabbing;
         post(() -> {
             if (isGrabbing) {
-                // Important for old Minecraft builds such as beta 1.7.3:
-                // do not recenter and send an absolute cursor position when the
-                // game re-grabs input after a GUI closes. Those builds can treat
-                // the center warp as real mouse movement, which snaps the camera
-                // straight to the sky/floor. Keep the current virtual cursor as
-                // the relative-input baseline and only send movement when the
-                // user actually moves touch/mouse/controller again.
                 suppressRelativeCursorUntilNanos = System.nanoTime() + POINTER_REGRAB_RELATIVE_SUPPRESS_NANOS;
                 cancelTouchLongPressAttack(true);
                 resetTouchTracking();
                 resetHardwarePointerTracking(true);
                 releaseAllHardwareMouseButtons();
+
+                // When Minecraft closes a GUI and re-grabs the pointer, reset the
+                // launcher-side cursor baseline to the middle of the current render
+                // buffer. Do not send the absolute center event while grabbed; older
+                // Minecraft versions can interpret that synthetic warp as real camera
+                // movement and snap the view to the sky/floor.
+                recenterMouse(false);
 
                 if (shouldUsePointerCapture()) {
                     safeRequestPointerCapture();
@@ -1324,6 +1411,11 @@ public class MinecraftGLSurface extends FrameLayout implements GrabListener {
             } else {
                 suppressRelativeCursorUntilNanos = 0L;
                 safeReleasePointerCapture();
+
+                // Opening a menu/inventory should begin with a centered GUI cursor.
+                // Here the game is not grabbing input, so sending the absolute center
+                // position is safe and keeps the visible menu cursor predictable.
+                recenterMouse(true);
             }
         });
     }
@@ -1435,24 +1527,42 @@ public class MinecraftGLSurface extends FrameLayout implements GrabListener {
     }
 
     /**
-     * Lets the Activity route KEYCODE_BACK from a physical keyboard into Minecraft
-     * before Android treats it as a launcher/system Back press. This is needed for
-     * keyboards that report Escape as BACK instead of KEYCODE_ESCAPE.
+     * Lets the Activity route real physical keyboard keys into Minecraft before
+     * Android handles launcher/system shortcuts.
+     *
+     * Important: KEYCODE_ESCAPE is Minecraft Escape. KEYCODE_BACK is the launcher
+     * Back shortcut and must stay with GameActivity so it can open the mapping UI.
      */
     public boolean handleKeyEventFromActivity(@NonNull KeyEvent event) {
+        if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+            return false;
+        }
         return handlePhysicalKeyboardEvent(event);
     }
 
     /**
      * Compatibility helper for Activity-side back guards.
      *
-     * Use this before opening launcher/gamepad dialogs so a physical keyboard Esc
-     * key that Android reports as BACK can still reach Minecraft as GLFW Escape.
+     * Return true only for a real keyboard Escape key. GameActivity should consume
+     * that by calling handleKeyEventFromActivity(event) and must not open the
+     * gamepad-mapping dialog for it.
      */
     public static boolean shouldRouteBackKeyToMinecraft(@Nullable KeyEvent event) {
-        if (event == null) return false;
-        if (event.getKeyCode() == KeyEvent.KEYCODE_ESCAPE) return true;
-        return isPhysicalKeyboardBackAsEsc(event);
+        return isKeyboardEscapeKey(event);
+    }
+
+    public static boolean isKeyboardEscapeKey(@Nullable KeyEvent event) {
+        return event != null
+                && event.getKeyCode() == KeyEvent.KEYCODE_ESCAPE
+                && (event.getFlags() & KeyEvent.FLAG_SOFT_KEYBOARD) == 0;
+    }
+
+    @Override
+    public boolean dispatchKeyEventPreIme(KeyEvent event) {
+        if (handlePhysicalKeyboardEvent(event)) {
+            return true;
+        }
+        return super.dispatchKeyEventPreIme(event);
     }
 
     @Override
@@ -1589,11 +1699,10 @@ public class MinecraftGLSurface extends FrameLayout implements GrabListener {
     }
 
     private boolean isPhysicalKeyboardEvent(@NonNull KeyEvent event) {
-        // A lot of USB/Bluetooth keyboards report Esc as Android BACK instead of
-        // KEYCODE_ESCAPE. Keep only physical-keyboard BACK inside Minecraft; real
-        // Android navigation/back still falls through to GameActivity.
+        // Android BACK belongs to GameActivity so it can open the launcher
+        // GameMapping dialog. Do not treat it as a Minecraft Escape key here.
         if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
-            return isPhysicalKeyboardBackAsEsc(event);
+            return false;
         }
 
         if (isSoftKeyboardGeneratedEvent(event)) return false;
@@ -1638,48 +1747,9 @@ public class MinecraftGLSurface extends FrameLayout implements GrabListener {
     }
 
     public static boolean isPhysicalKeyboardBackAsEsc(@Nullable KeyEvent event) {
-        if (event == null || event.getKeyCode() != KeyEvent.KEYCODE_BACK) return false;
-        if ((event.getFlags() & KeyEvent.FLAG_SOFT_KEYBOARD) != 0) return false;
-
-        InputDevice device = null;
-        try {
-            device = event.getDevice();
-        } catch (Throwable ignored) {
-        }
-
-        int source = event.getSource();
-        int scanCode = safeScanCode(event);
-        boolean sourceKeyboard = (source & InputDevice.SOURCE_KEYBOARD) == InputDevice.SOURCE_KEYBOARD;
-        boolean sourceDpad = (source & InputDevice.SOURCE_DPAD) == InputDevice.SOURCE_DPAD;
-        boolean deviceKeyboard = device != null && device.getKeyboardType() != InputDevice.KEYBOARD_TYPE_NONE;
-        boolean hasHardwareScanCode = scanCode != 0;
-        boolean looksLikeEscScanCode = scanCode == 1;
-        boolean virtualKeyboard = event.getDeviceId() == KeyCharacterMap.VIRTUAL_KEYBOARD;
-
-        // System/navigation BACK is normally not a keyboard source and usually has
-        // no useful scancode. Some Bluetooth keyboards and keyboard/touchpad combos
-        // report Escape as BACK with odd DPAD/game-ish metadata, so accept those
-        // when they still carry keyboard/source/scancode evidence.
-        boolean keyboardCandidate = sourceKeyboard
-                || deviceKeyboard
-                || looksLikeEscScanCode
-                || (sourceDpad && hasHardwareScanCode);
-        if (!keyboardCandidate) return false;
-
-        // Do not let plain controller Back/Select become keyboard Escape, but do
-        // allow hybrid HID devices that still clearly expose a keyboard side.
-        if (isGameControllerDevice(device)
-                && !sourceKeyboard
-                && !deviceKeyboard
-                && !looksLikeEscScanCode) {
-            return false;
-        }
-
-        return looksLikeEscScanCode
-                || hasHardwareScanCode
-                || sourceKeyboard
-                || deviceKeyboard
-                || !virtualKeyboard;
+        // Deprecated compatibility helper. Returning false is intentional:
+        // KEYCODE_BACK is reserved for GameActivity and the launcher GameMapping dialog.
+        return false;
     }
 
     private static boolean isControllerLikeKeyCode(int keyCode) {
@@ -1874,7 +1944,7 @@ public class MinecraftGLSurface extends FrameLayout implements GrabListener {
             case KeyEvent.KEYCODE_GRAVE: return 96;
 
             case KeyEvent.KEYCODE_ESCAPE: return 256;
-            case KeyEvent.KEYCODE_BACK: return 256; // Some physical keyboards report Esc as Android BACK.
+            case KeyEvent.KEYCODE_BACK: return -1; // Android BACK is handled by GameActivity, not Minecraft.
             case KeyEvent.KEYCODE_ENTER:
             case KeyEvent.KEYCODE_NUMPAD_ENTER: return 257;
             case KeyEvent.KEYCODE_TAB: return 258;

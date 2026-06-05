@@ -24,6 +24,7 @@ import android.view.ViewParent;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -32,7 +33,7 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import ca.dnamobile.javalauncher.utils.FullscreenUtils;
 
-/** Drag buttons to move; long-press a button to edit/delete it. */
+/** Drag buttons to move; tap a button to edit/delete it. */
 public final class ControlsEditorActivity extends AppCompatActivity {
     private static final String UI_PREFS = "touch_controls_editor_ui";
     private static final String KEY_MENU_X = "floating_menu_x";
@@ -42,6 +43,8 @@ public final class ControlsEditorActivity extends AppCompatActivity {
     private FrameLayout root;
     private LinearLayout editorPanel;
     private Button menuButton;
+    private TextView globalOpacityValue;
+    private SeekBar globalOpacitySlider;
 
     private int menuTouchSlop;
     private float menuDownRawX;
@@ -116,6 +119,8 @@ public final class ControlsEditorActivity extends AppCompatActivity {
         header.setPadding(0, 0, 0, dp(6));
         editorPanel.addView(header, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
+        addGlobalOpacityControls();
+
         LinearLayout rowOne = panelRow();
         LinearLayout rowTwo = panelRow();
         LinearLayout rowThree = panelRow();
@@ -124,7 +129,7 @@ public final class ControlsEditorActivity extends AppCompatActivity {
         Button addKey = panelButton("Add Key");
         addKey.setOnClickListener(view -> {
             overlay.addControl(TouchControlData.key("Key", 32, 120, 120, 72, 52));
-            Toast.makeText(this, "Long-press the new button to edit it.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Tap the new button to edit it.", Toast.LENGTH_SHORT).show();
         });
         rowOne.addView(addKey, panelButtonParams());
 
@@ -198,6 +203,69 @@ public final class ControlsEditorActivity extends AppCompatActivity {
         editorPanel.addView(rowTwo);
         editorPanel.addView(rowThree);
         editorPanel.addView(rowFour);
+    }
+
+
+    private void addGlobalOpacityControls() {
+        TextView title = new TextView(this);
+        title.setText("All button opacity");
+        title.setTextSize(12f);
+        title.setTextColor(0xFFE0E0E0);
+        title.setGravity(Gravity.CENTER);
+        title.setPadding(0, dp(4), 0, 0);
+        editorPanel.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+
+        globalOpacityValue = new TextView(this);
+        globalOpacityValue.setTextSize(11f);
+        globalOpacityValue.setTextColor(0xFFBDBDBD);
+        globalOpacityValue.setGravity(Gravity.CENTER);
+        globalOpacityValue.setPadding(0, 0, 0, dp(2));
+        editorPanel.addView(globalOpacityValue, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+
+        globalOpacitySlider = new SeekBar(this);
+        globalOpacitySlider.setMax(100);
+        int progress = Math.round(ControlsPreferences.getGlobalOpacity(this) * 100f);
+        globalOpacitySlider.setProgress(Math.max(0, Math.min(100, progress)));
+        updateGlobalOpacityLabel(globalOpacitySlider.getProgress());
+        globalOpacitySlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                int safeProgress = Math.max(0, Math.min(100, progress));
+                updateGlobalOpacityLabel(safeProgress);
+                if (fromUser) {
+                    ControlsPreferences.setGlobalOpacity(ControlsEditorActivity.this, safeProgress / 100f);
+                    if (overlay != null) overlay.refreshButtonVisuals();
+                }
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                int safeProgress = Math.max(0, Math.min(100, seekBar.getProgress()));
+                ControlsPreferences.setGlobalOpacity(ControlsEditorActivity.this, safeProgress / 100f);
+                updateGlobalOpacityLabel(safeProgress);
+                if (overlay != null) overlay.refreshButtonVisuals();
+            }
+        });
+        editorPanel.addView(globalOpacitySlider, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(38)
+        ));
+    }
+
+    private void updateGlobalOpacityLabel(int progress) {
+        if (globalOpacityValue != null) {
+            globalOpacityValue.setText("Opacity: " + Math.max(0, Math.min(100, progress)) + "%");
+        }
     }
 
     private boolean handleMenuButtonTouch(View view, MotionEvent event) {

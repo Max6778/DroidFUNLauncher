@@ -44,6 +44,7 @@ import ca.dnamobile.javalauncher.controls.ControlsPreferences;
 import ca.dnamobile.javalauncher.controls.TouchControlsLayoutData;
 import ca.dnamobile.javalauncher.controls.TouchControlsStore;
 import ca.dnamobile.javalauncher.controls.TouchKeyPickerDialog;
+import ca.dnamobile.javalauncher.settings.GameOverlayPreferences;
 import ca.dnamobile.javalauncher.settings.LauncherPreferences;
 
 import java.io.File;
@@ -205,6 +206,8 @@ public final class GamepadMappingDialog {
         CheckBox showCursorOverlay = addCheckBox(activity, overlayCard, "Show controller cursor overlay in menus", store.isShowCursorOverlay());
         addSmallHint(activity, overlayCard, "Visual only. It no longer becomes a touch target, so screen taps and Touch Controller input pass through to Minecraft.");
         CheckBox showFloatingSettingsButton = addCheckBox(activity, overlayCard, "Show floating settings button", LauncherPreferences.isShowInGameSettingsButton(activity));
+        CheckBox showFpsCounter = addCheckBox(activity, overlayCard, "Show FPS counter on floating button", GameOverlayPreferences.isShowGameFpsCounter(activity));
+        addSmallHint(activity, overlayCard, "Enabled by default. Turn this off if the FPS text feels distracting while playing.");
         CheckBox showLogOverlay = addCheckBox(activity, overlayCard, "Show latest log on the left side", LauncherPreferences.isShowGameLogOverlay(activity));
 
         addPlainLabel(activity, overlayCard, "Touch controls layout");
@@ -273,7 +276,7 @@ public final class GamepadMappingDialog {
                 "Game resolution scale",
                 listener
         );
-        addSmallHint(activity, overlayCard, "Lower this for better FPS, raise it for sharper rendering. The live change is applied only when you release the slider so the game surface is not resized repeatedly while dragging.");
+        addSmallHint(activity, overlayCard, "Lower this for better FPS, raise it for sharper rendering. This updates live while you drag so you can immediately judge image quality and performance.");
 
         // Hotbar card.
         LinearLayout hotbarCard = addCard(activity, root);
@@ -363,6 +366,7 @@ public final class GamepadMappingDialog {
                     store.setForceGameMode(forceGameMode.isChecked());
                     store.setShowCursorOverlay(showCursorOverlay.isChecked());
                     LauncherPreferences.setShowInGameSettingsButton(activity, showFloatingSettingsButton.isChecked());
+                    GameOverlayPreferences.setShowGameFpsCounter(activity, showFpsCounter.isChecked());
                     LauncherPreferences.setShowGameLogOverlay(activity, showLogOverlay.isChecked());
                     store.setMenuCursorSensitivity(progressToSensitivity(menuSensitivity.getProgress()));
                     store.setGameCameraSensitivity(progressToSensitivity(gameSensitivity.getProgress()));
@@ -383,6 +387,7 @@ public final class GamepadMappingDialog {
                     saved[0] = true;
                     store.resetDefaults();
                     ControlsPreferences.resetHotbarHitboxSettings(activity);
+                    GameOverlayPreferences.setShowGameFpsCounter(activity, true);
                     LauncherPreferences.setGameResolutionScalePercent(activity, LauncherPreferences.DEFAULT_GAME_RESOLUTION_SCALE_PERCENT);
                     notifySettingsChanged(activity, listener);
                 })
@@ -902,6 +907,8 @@ public final class GamepadMappingDialog {
         seekBar.setMax(LauncherPreferences.MAX_GAME_RESOLUTION_SCALE_PERCENT - LauncherPreferences.MIN_GAME_RESOLUTION_SCALE_PERCENT);
         seekBar.setProgress(resolutionScaleToProgress(resolutionScale));
 
+        final int[] lastAppliedProgress = new int[]{seekBar.getProgress()};
+
         label.setOnClickListener(v -> showNumberInputDialog(
                 activity,
                 title,
@@ -911,7 +918,9 @@ public final class GamepadMappingDialog {
                 "%",
                 newValue -> {
                     int clamped = LauncherPreferences.clampGameResolutionScalePercent(newValue);
-                    seekBar.setProgress(resolutionScaleToProgress(clamped));
+                    int progress = resolutionScaleToProgress(clamped);
+                    seekBar.setProgress(progress);
+                    lastAppliedProgress[0] = progress;
                     applyGameResolutionScale(activity, clamped, label, title, listener);
                 }
         ));
@@ -921,6 +930,13 @@ public final class GamepadMappingDialog {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 label.setText(title + ": " + progressToResolutionScale(progress) + "%");
+
+                if (!fromUser || progress == lastAppliedProgress[0]) {
+                    return;
+                }
+
+                lastAppliedProgress[0] = progress;
+                applyGameResolutionScale(activity, progressToResolutionScale(progress), label, title, listener);
             }
 
             @Override
@@ -930,7 +946,11 @@ public final class GamepadMappingDialog {
 
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {
-                applyGameResolutionScale(activity, progressToResolutionScale(seekBar.getProgress()), label, title, listener);
+                int progress = seekBar.getProgress();
+                if (progress != lastAppliedProgress[0]) {
+                    lastAppliedProgress[0] = progress;
+                    applyGameResolutionScale(activity, progressToResolutionScale(progress), label, title, listener);
+                }
                 setActiveDialogHitboxPreviewAlpha(false);
             }
         });

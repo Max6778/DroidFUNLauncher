@@ -99,10 +99,10 @@ JNIEXPORT void JNICALL Java_net_kdt_pojavlaunch_AWTInputBridge_nativeSendData(JN
         assert(method_ReceiveInput != NULL);
     }
     (*runtimeJNIEnvPtr_INPUT)->CallStaticVoidMethod(
-        runtimeJNIEnvPtr_INPUT,
-        class_CTCAndroidInput,
-        method_ReceiveInput,
-        type, i1, i2, i3, i4
+            runtimeJNIEnvPtr_INPUT,
+            class_CTCAndroidInput,
+            method_ReceiveInput,
+            type, i1, i2, i3, i4
     );
 }
 
@@ -120,7 +120,7 @@ JNIEXPORT jintArray JNICALL Java_net_kdt_pojavlaunch_utils_JREUtils_renderAWTScr
 
     int *rgbArray;
     jintArray jreRgbArray, androidRgbArray;
-  
+
     if (method_GetRGB == NULL) {
         class_CTCScreen = (*runtimeJNIEnvPtr_GRAPHICS)->FindClass(runtimeJNIEnvPtr_GRAPHICS, "net/java/openjdk/cacio/ctc/CTCScreen");
         if ((*runtimeJNIEnvPtr_GRAPHICS)->ExceptionCheck(runtimeJNIEnvPtr_GRAPHICS) == JNI_TRUE) {
@@ -132,24 +132,24 @@ JNIEXPORT jintArray JNICALL Java_net_kdt_pojavlaunch_utils_JREUtils_renderAWTScr
         assert(method_GetRGB != NULL);
     }
     jreRgbArray = (jintArray) (*runtimeJNIEnvPtr_GRAPHICS)->CallStaticObjectMethod(
-        runtimeJNIEnvPtr_GRAPHICS,
-        class_CTCScreen,
-        method_GetRGB
+            runtimeJNIEnvPtr_GRAPHICS,
+            class_CTCScreen,
+            method_GetRGB
     );
     if (jreRgbArray == NULL) {
         return NULL;
     }
-    
+
     // Copy JRE RGB array memory to Android.
     int arrayLength = (*runtimeJNIEnvPtr_GRAPHICS)->GetArrayLength(runtimeJNIEnvPtr_GRAPHICS, jreRgbArray);
     rgbArray = (*runtimeJNIEnvPtr_GRAPHICS)->GetIntArrayElements(runtimeJNIEnvPtr_GRAPHICS, jreRgbArray, 0);
     androidRgbArray = (*env)->NewIntArray(env, arrayLength);
     (*env)->SetIntArrayRegion(env, androidRgbArray, 0, arrayLength, rgbArray);
 
-    (*runtimeJNIEnvPtr_GRAPHICS)->ReleaseIntArrayElements(runtimeJNIEnvPtr_GRAPHICS, jreRgbArray, rgbArray, NULL);
+    (*runtimeJNIEnvPtr_GRAPHICS)->ReleaseIntArrayElements(runtimeJNIEnvPtr_GRAPHICS, jreRgbArray, rgbArray, JNI_ABORT);
     // (*env)->DeleteLocalRef(env, androidRgbArray);
     // free(rgbArray);
-    
+
     return androidRgbArray;
 }
 

@@ -325,6 +325,8 @@ public final class SafMinecraftMirror {
         for (File child : children) {
             if (child.getName().equals("launcher_log")) continue;
             if (child.getName().equals(".java_launcher_saf_tmp")) continue;
+            if (child.getName().equals(".scoped_storage_metadata_loaded")) continue;
+            if (child.getName().equals(".pending_delete")) continue;
 
             if (child.isDirectory()) {
                 Uri childDirectory = ensureDirectory(context, documentDirectory, child.getName(), existingDirectories);

@@ -167,6 +167,56 @@ void load_vulkan(void) {
     set_vulkan_ptr(vulkanPtr);
 }
 
+static bool env_is(const char* value, const char* expected) {
+    return value != NULL && expected != NULL && strcmp(value, expected) == 0;
+}
+
+static bool env_enabled(const char* value) {
+    return value != NULL
+           && value[0] != '\0'
+           && strcmp(value, "0") != 0
+           && strcmp(value, "false") != 0
+           && strcmp(value, "FALSE") != 0;
+}
+
+static bool is_droidbridge_mesa_zink_turnip(const char* renderer,
+                                            const char* mesa_mode,
+                                            const char* mesa_driver,
+                                            const char* renderer_mesa_mode,
+                                            const char* droidbridge_mesa) {
+    if (!env_enabled(droidbridge_mesa)) {
+        return false;
+    }
+
+    return env_is(mesa_mode, "zink_turnip")
+           || env_is(renderer_mesa_mode, "zink_turnip")
+           || (env_is(renderer, "vulkan_zink") && env_is(mesa_driver, "zink"));
+}
+
+static void configure_droidbridge_mesa_zink_turnip_desktop_gl(void) {
+    printf("EGLBridge: Using DroidBridge Mesa zink_turnip desktop GL bridge\n");
+
+    setenv("DROIDBRIDGE_MESA", "1", 1);
+    setenv("DROIDBRIDGE_MESA_MODE", "zink_turnip", 1);
+    setenv("DROIDBRIDGE_MESA_DRIVER", "zink", 1);
+    setenv("POJAV_RENDERER_MESA_MODE", "zink_turnip", 1);
+
+    setenv("GALLIUM_DRIVER", "zink", 1);
+    setenv("MESA_LOADER_DRIVER_OVERRIDE", "zink", 1);
+    setenv("MESA_GL_VERSION_OVERRIDE", "4.6COMPAT", 1);
+    setenv("MESA_GLSL_VERSION_OVERRIDE", "460", 1);
+
+    /*
+     * Critical: Minecraft 26.x compiles desktop GLSL 330+ shaders.
+     * A GLES 3.x context reports only GLSL ES versions and then crashes in Mesa.
+     * These flags are consumed by DroidBridge's EGL/GL bridge implementation.
+     */
+    setenv("DROIDBRIDGE_MESA_DESKTOP_GL", "1", 1);
+    setenv("DROIDBRIDGE_EGL_FORCE_DESKTOP_GL", "1", 1);
+    setenv("DROIDBRIDGE_EGL_NO_SYSTEM_FALLBACK", "1", 1);
+    unsetenv("LIBGL_ES");
+}
+
 int pojavInitOpenGL(void) {
     const char* forceVsync = getenv("FORCE_VSYNC");
     if (forceVsync != NULL && strcmp(forceVsync, "true") == 0) {
@@ -179,9 +229,67 @@ int pojavInitOpenGL(void) {
         return 0;
     }
 
-    load_vulkan();
+    const char* mesa_mode = getenv("DROIDBRIDGE_MESA_MODE");
+    const char* mesa_driver = getenv("DROIDBRIDGE_MESA_DRIVER");
+    const char* renderer_mesa_mode = getenv("POJAV_RENDERER_MESA_MODE");
+    const char* droidbridge_mesa = getenv("DROIDBRIDGE_MESA");
 
-    if (strncmp("opengles", renderer, 8) == 0) {
+    bool mesa_zink_turnip = is_droidbridge_mesa_zink_turnip(
+            renderer,
+            mesa_mode,
+            mesa_driver,
+            renderer_mesa_mode,
+            droidbridge_mesa
+    );
+
+    bool direct_mesa_kgsl = (strcmp(renderer, "freedreno_kgsl") == 0)
+                            || (mesa_mode != NULL && strcmp(mesa_mode, "freedreno_kgsl") == 0)
+                            || (mesa_driver != NULL && strcmp(mesa_driver, "kgsl") == 0);
+
+    if (direct_mesa_kgsl) {
+        /* Mojo-style direct Freedreno/KGSL path. Do not initialize the Vulkan loader here.
+         * Loading Vulkan/Turnip before Mesa EGL can put the wrong graphics stack into the
+         * process before the KGSL EGL backend creates its display.
+         */
+        printf("OSMDroid: Skipping Vulkan loader for direct Mesa KGSL renderer.\n");
+        set_vulkan_ptr(NULL);
+    } else {
+        load_vulkan();
+    }
+
+    if (mesa_zink_turnip) {
+        /*
+         * DroidBridge intentionally keeps POJAV_RENDERER=opengles3 for this path
+         * so libpojavexec does not enter the legacy OSMesa vulkan_zink renderer.
+         * However, the normal opengles branch creates a GLES context, which cannot
+         * run Minecraft 26.x desktop GLSL shaders. Treat zink_turnip as a Mesa
+         * desktop-GL bridge here before the generic opengles path can claim it.
+         */
+        configure_droidbridge_mesa_zink_turnip_desktop_gl();
+        pojav_environ->config_renderer = RENDERER_GL4ES;
+        set_gl_bridge_tbl();
+    } else if (strncmp("opengles", renderer, 8) == 0) {
+        pojav_environ->config_renderer = RENDERER_GL4ES;
+        set_gl_bridge_tbl();
+    }
+
+    if (strcmp(renderer, "freedreno_kgsl") == 0) {
+        /* DroidBridge/Mesa direct KGSL mode.
+         * Use the GL bridge, but force it to request an EGL desktop OpenGL
+         * context instead of an OpenGL ES context. Without this branch the
+         * bridge table stays unset and pojavInitOpenGL can crash.
+         */
+        printf("EGLBridge: Using DroidBridge Mesa freedreno_kgsl GL bridge\n");
+        setenv("DROIDBRIDGE_MESA", "1", 1);
+        setenv("DROIDBRIDGE_MESA_DRIVER", "kgsl", 1);
+        setenv("POJAV_RENDERER_MESA_MODE", "freedreno_kgsl", 1);
+        setenv("MESA_LOADER_DRIVER_OVERRIDE", "kgsl", 1);
+        /* Mojo-style KGSL: kgsl is the Mesa Android loader override, not the Gallium pipe driver.
+         * Leaving GALLIUM_DRIVER unset avoids Mesa falling back to /dev/dri/swrast when it
+         * cannot create a "kgsl" Gallium screen.
+         */
+        unsetenv("GALLIUM_DRIVER");
+        setenv("DROIDBRIDGE_MESA_DESKTOP_GL", "1", 1);
         pojav_environ->config_renderer = RENDERER_GL4ES;
         set_gl_bridge_tbl();
     }
@@ -191,10 +299,13 @@ int pojavInitOpenGL(void) {
         set_osm_bridge_tbl();
     }
 
-    if (strcmp(renderer, "vulkan_zink") == 0) {
+    if (strcmp(renderer, "vulkan_zink") == 0 && !mesa_zink_turnip) {
+        printf("EGLBridge: Using DroidBridge/Mesa Zink Vulkan bridge\n");
         pojav_environ->config_renderer = RENDERER_VK_ZINK;
         load_vulkan();
         setenv("GALLIUM_DRIVER", "zink", 1);
+        setenv("MESA_LOADER_DRIVER_OVERRIDE", "zink", 1);
+        setenv("POJAV_RENDERER_MESA_MODE", "zink_turnip", 1);
         set_osm_bridge_tbl();
     }
 

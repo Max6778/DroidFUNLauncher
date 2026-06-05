@@ -90,7 +90,6 @@ public final class DriverPluginManager {
         DRIVERS.clear();
 
         addDriver(new Driver(DEFAULT_MESA_DRIVER, Driver.Type.DEFAULT_MESA, null, null, null));
-
         addBuiltInTurnipIfAvailable(context);
         discoverInstalledDriverPlugins(context);
     }
@@ -130,7 +129,10 @@ public final class DriverPluginManager {
         if (renderer == null) return false;
         String combined = (renderer.getRendererId() + " " + renderer.getRendererName() + " " + renderer.getRendererLibrary())
                 .toLowerCase(Locale.ROOT);
-        return combined.contains("vulkan_zink") || combined.contains("zink") || combined.contains("osmesa");
+        return combined.contains("vulkan_zink")
+                || combined.contains("zink")
+                || combined.contains("osmesa")
+                || DroidBridgeMesaSupport.isMesaZinkTurnipRenderer(renderer);
     }
 
     @NonNull
@@ -188,7 +190,80 @@ public final class DriverPluginManager {
 
         applyGlobalVulkanDriverEnvironment(context, env, driver, true, useSystemVulkan);
         applyZinkMesaEnvironment(env);
+
+        // v56: first force the safe Android presentation path for all Vulkan Zink
+        // launches. The log proves Zink creates a context, while the Adreno 740
+        // visual issue remains in the final displayed frame.
+        DroidBridgeMesaSupport.applyZinkSurfaceWorkaround(renderer);
+
+        // v61: the legacy Freedreno UUID returns earlier as direct freedreno_kgsl.
+        // Do not alias it to Vulkan Zink here, otherwise swapped Mojo libEGL_mesa
+        // and libgallium_dri payloads will never be used.
+
+        // Explicit custom Mesa-Zink entries can still use the experimental route.
+        DroidBridgeMesaSupport.applyZinkTurnipEnvironment(context, renderer, env);
         return env;
+    }
+
+    private static void applyDirectFreedrenoKgslEnvironment(@NonNull LinkedHashMap<String, String> env) {
+        // v61: saved Mesa Freedreno KGSL is no longer a Vulkan Zink alias.
+        // Reinforce the renderer's Mojo-style direct Mesa env here because
+        // DriverPluginManager is merged after renderer.getRendererEnv().
+        env.put("DROIDBRIDGE_MESA", "1");
+        env.put("DROIDBRIDGE_MESA_MODE", "freedreno_kgsl");
+        env.put("DROIDBRIDGE_MESA_SAFE_SWAPS", "1");
+        env.put("DROIDBRIDGE_MESA_DRIVER", "kgsl");
+        env.put("DROIDBRIDGE_MOJO_MESA_V61", "1");
+        env.put("DROIDBRIDGE_MESA_AAR_SINGLE_SOURCE", "1");
+        env.put("DROIDBRIDGE_MOJO_MESA_AAR_V72", "1");
+
+        env.put("POJAV_RENDERER", "freedreno_kgsl");
+        env.put("POJAV_RENDERER_MESA_MODE", "freedreno_kgsl");
+        env.put("MESA_LOADER_DRIVER_OVERRIDE", "kgsl");
+        env.put("GALLIUM_DRIVER", "");
+        env.put("EGL_PLATFORM", "android");
+        env.put("FORCE_VSYNC", "false");
+
+        env.put("LIBGL_ES", "2");
+        env.put("MESA_GL_VERSION_OVERRIDE", "3.3COMPAT");
+        env.put("MESA_GLSL_VERSION_OVERRIDE", "330");
+        env.put("MESA_GLSL_CACHE_DISABLE", "false");
+        env.put("MESA_SHADER_CACHE_DISABLE", "false");
+        env.put("LIBGL_MIPMAP", "3");
+        env.put("LIBGL_NOINTOVLHACK", "1");
+        env.put("LIBGL_NORMALIZE", "1");
+        env.put("LIBGL_NOERROR", "0");
+        env.put("allow_higher_compat_version", "true");
+        env.put("force_glsl_extensions_warn", "true");
+        env.put("allow_glsl_extension_directive_midshader", "true");
+
+        env.put("DROIDBRIDGE_MESA_DESKTOP_GL", "1");
+        env.put("DROIDBRIDGE_EGL_FORCE_DESKTOP_GL", "1");
+        env.put("DROIDBRIDGE_EGL_NO_SYSTEM_FALLBACK", "1");
+
+        env.put("POJAVEXEC_EGL", DroidBridgeMesaSupport.LIB_EGL_MESA);
+        env.put("POJAV_EGL_LIBRARY", DroidBridgeMesaSupport.LIB_EGL_MESA);
+        env.put("POJAVEXEC_EGL_LIBRARY", DroidBridgeMesaSupport.LIB_EGL_MESA);
+        env.put("POJAV_RENDERER_LIBRARY", DroidBridgeMesaSupport.LIB_EGL_MESA);
+        env.put("POJAVEXEC_RENDERER", DroidBridgeMesaSupport.LIB_EGL_MESA);
+        env.put("LIB_MESA_NAME", DroidBridgeMesaSupport.LIB_EGL_MESA);
+
+        env.put("POJAV_USE_SYSTEM_VULKAN", "");
+        env.put("DRIVER_PATH", "");
+        env.put("VK_ICD_FILENAMES", "");
+        env.put("VK_DRIVER_FILES", "");
+        env.put("POJAV_LOAD_TURNIP", "");
+        env.put("DROIDBRIDGE_LOAD_TURNIP", "");
+        env.put("DROIDBRIDGE_USE_CUSTOM_TURNIP", "");
+        env.put("DROIDBRIDGE_CUSTOM_VULKAN_DRIVER", "");
+        env.put("POJAV_CUSTOM_VULKAN_DRIVER", "");
+        env.put("ZINK_DEBUG", "");
+        env.put("ZINK_DESCRIPTORS", "");
+
+        env.put("OSMESA_LIB", "");
+        env.put("POJAV_OSMESA_LIBRARY", "");
+        env.put("OSMESA_LIBRARY", "");
+        env.put("LIBGL_OSMESA", "");
     }
 
     private static void applyGlobalVulkanDriverEnvironment(
@@ -253,6 +328,26 @@ public final class DriverPluginManager {
     }
 
     private static void applyZinkMesaEnvironment(@NonNull LinkedHashMap<String, String> env) {
+        // v57: Always make the Java environment match the known-good Vulkan Zink
+        // route. The latest Freedreno-alias log still had POJAV_RENDERER=vulkan_zink
+        // but POJAVEXEC_EGL was overwritten back to libEGL_mesa.so, which made
+        // LWJGL report "no OpenGL context current" even though OSMesaMakeCurrent
+        // succeeded. Keep these values set for every Zink launch, not just the
+        // legacy alias helper.
+        env.put("POJAV_RENDERER", "vulkan_zink");
+        env.put("POJAVEXEC_EGL", "libOSMesa_8.so");
+        env.put("POJAV_EGL_LIBRARY", "libOSMesa_8.so");
+        env.put("POJAVEXEC_EGL_LIBRARY", "libOSMesa_8.so");
+        env.put("POJAV_RENDERER_LIBRARY", "libOSMesa_8.so");
+        env.put("POJAVEXEC_RENDERER", "libOSMesa_8.so");
+        env.put("LIB_MESA_NAME", "libOSMesa_8.so");
+        env.put("OSMESA_LIB", "libOSMesa_8.so");
+        env.put("POJAV_OSMESA_LIBRARY", "libOSMesa_8.so");
+        env.put("OSMESA_LIBRARY", "libOSMesa_8.so");
+        env.put("LIBGL_OSMESA", "libOSMesa_8.so");
+        env.put("DROIDBRIDGE_ZINK_V57_FORCE_OSMESA_EGL", "1");
+        env.put("DROIDBRIDGE_ZINK_V61_CLEAN_ZINK", "1");
+
         // Pojav/Zalith's OSMesa/Zink path expects these basic Mesa values.
         env.put("MESA_LOADER_DRIVER_OVERRIDE", "zink");
         env.put("GALLIUM_DRIVER", "zink");
@@ -286,24 +381,25 @@ public final class DriverPluginManager {
         File dir = new File(PathManager.DIR_CACHE, "vulkan_icd");
         if (!dir.exists() && !dir.mkdirs()) return null;
 
-        String safe = driver.getName().replaceAll("[^A-Za-z0-9_.-]", "_");
-        File icd = new File(dir, safe + ".json");
+        String libraryPath = vulkan.getAbsolutePath();
+        String safeName = (driver.getPackageName() != null ? driver.getPackageName() : driver.getName())
+                .replaceAll("[^A-Za-z0-9_.-]", "_");
+        File icd = new File(dir, safeName + ".json");
+
         try {
             JSONObject root = new JSONObject();
             JSONObject icdObject = new JSONObject();
-            root.put("file_format_version", "1.0.0");
-            icdObject.put("library_path", vulkan.getAbsolutePath());
+            icdObject.put("library_path", libraryPath);
             icdObject.put("api_version", "1.3.0");
+            root.put("file_format_version", "1.0.0");
             root.put("ICD", icdObject);
 
-            try (FileOutputStream output = new FileOutputStream(icd)) {
-                output.write(root.toString().getBytes(StandardCharsets.UTF_8));
+            try (FileOutputStream outputStream = new FileOutputStream(icd, false)) {
+                outputStream.write(root.toString().getBytes(StandardCharsets.UTF_8));
             }
-            //noinspection ResultOfMethodCallIgnored
-            icd.setReadable(true, false);
             return icd;
         } catch (Throwable throwable) {
-            Logging.e(TAG, "Failed to write Vulkan ICD file for " + driver.getName(), throwable);
+            Logging.e(TAG, "Unable to write Vulkan ICD for " + driver.getName(), throwable);
             return null;
         }
     }
@@ -318,10 +414,14 @@ public final class DriverPluginManager {
         for (File dir : dirs) {
             File vulkan = findVulkanLibrary(dir);
             if (vulkan != null) {
-                addDriver(new Driver("Built-in Turnip / Adreno", Driver.Type.TURNIP, context.getPackageName(), dir, vulkan));
+                addDriver(new Driver("Bundled Turnip/Freedreno", Driver.Type.TURNIP, null, dir, vulkan));
                 return;
             }
         }
+    }
+
+    private static void addDirIfValid(@NonNull ArrayList<File> dirs, @Nullable File dir) {
+        if (dir != null && dir.isDirectory() && !dirs.contains(dir)) dirs.add(dir);
     }
 
     private static void discoverInstalledDriverPlugins(@NonNull Context context) {
@@ -418,17 +518,15 @@ public final class DriverPluginManager {
     private static void addDriver(@NonNull Driver driver) {
         for (int i = 0; i < DRIVERS.size(); i++) {
             Driver existing = DRIVERS.get(i);
-            if (existing.getName().equals(driver.getName())) {
-                DRIVERS.set(i, driver);
-                Logging.i(TAG, "Driver replaced: " + driver.getName());
-                return;
-            }
+            if (sameDriver(existing, driver)) return;
         }
         DRIVERS.add(driver);
-        Logging.i(TAG, "Driver loaded: " + driver.getName());
     }
 
-    private static void addDirIfValid(@NonNull List<File> dirs, @Nullable File dir) {
-        if (dir != null && dir.isDirectory() && !dirs.contains(dir)) dirs.add(dir);
+    private static boolean sameDriver(@NonNull Driver a, @NonNull Driver b) {
+        if (a.getPackageName() != null && a.getPackageName().equals(b.getPackageName())) return true;
+        File av = a.getVulkanLibrary();
+        File bv = b.getVulkanLibrary();
+        return av != null && bv != null && av.getAbsolutePath().equals(bv.getAbsolutePath());
     }
 }

@@ -12,10 +12,22 @@ $(call import-module,prefab/bytehook)
 LOCAL_PATH := $(HERE_PATH)
 
 
+# Mesa direct-EGL mode for DroidBridge Mesa/Freedreno.
+#
+# Do NOT build an app-local LOCAL_MODULE := EGL shim for the Mojo-style KGSL
+# path. Mojo's working path lets libpojavexec load libEGL_mesa.so through its
+# own EGL loader while the bridge remains linked against Android's normal EGL
+# symbols for ANativeWindow/GLSurface setup. Linking libpojavexec directly to
+# the DroidBridge libEGL.so shim made GLFW fail before it could create the
+# window/context.
+
+
 include $(CLEAR_VARS)
-LOCAL_LDLIBS := -ldl -llog -landroid
+LOCAL_LDLIBS := -ldl -llog -landroid -lEGL -lGLESv2
 LOCAL_MODULE := pojavexec
 LOCAL_SHARED_LIBRARIES := driver_helper
+# Keep libpojavexec on Android system EGL symbols; it will still load Mesa via
+# POJAVEXEC_EGL=libEGL_mesa.so at runtime, matching Mojo's KGSL path.
 LOCAL_CFLAGS += -rdynamic
 LOCAL_SRC_FILES := \
     bigcoreaffinity.c \
@@ -35,10 +47,6 @@ LOCAL_SRC_FILES := \
     java_exec_hooks.c \
     lwjgl_dlopen_hook.c
 
-ifeq ($(TARGET_ARCH_ABI),arm64-v8a)
-LOCAL_CFLAGS += -DADRENO_POSSIBLE
-LOCAL_LDLIBS += -lEGL -lGLESv2
-endif
 include $(BUILD_SHARED_LIBRARY)
 
 
@@ -51,17 +59,18 @@ include $(BUILD_SHARED_LIBRARY)
 
 
 include $(CLEAR_VARS)
-LOCAL_LDLIBS := -ldl -llog -landroid
+LOCAL_LDLIBS := -ldl -llog -landroid -lEGL -lGLESv2
 LOCAL_MODULE := driver_helper
+# Enable Android linker namespace loading for Mesa/Freedreno KGSL. This is the
+# key difference from Mojo's working log: "Loaded EGL libEGL_mesa.so (in namespace: 1)".
+LOCAL_CFLAGS += -DADRENO_POSSIBLE
+# Keep driver_helper on Android system EGL symbols; Mesa itself is selected
+# dynamically through POJAVEXEC_EGL/libEGL_mesa.so.
 LOCAL_SRC_FILES := \
     driver_helper/driver_helper.c \
     driver_helper/nsbypass.c
 LOCAL_CFLAGS += -g -rdynamic
 
-ifeq ($(TARGET_ARCH_ABI),arm64-v8a)
-LOCAL_CFLAGS += -DADRENO_POSSIBLE
-LOCAL_LDLIBS += -lEGL -lGLESv2
-endif
 include $(BUILD_SHARED_LIBRARY)
 
 
@@ -272,12 +281,19 @@ LOCAL_LDFLAGS += -Wl,-soname,libXdmcp.so.6
 include $(BUILD_SHARED_LIBRARY)
 
 
-# Desktop Linux compatibility shim for Minecraft Snapshot WebRTC: libdrm.so.2
+# App-local libdrm compatibility layer for DroidBridge/Mojo Mesa.
+#
+# Do not use the old tiny WebRTC drm_stub.c here. Mesa's libEGL_mesa.so and
+# libgallium_dri.so have DT_NEEDED libdrm.so and require symbols including
+# drmGetDevice2, drmGetDevices2, drmCommandWriteRead, and syncobj helpers at
+# dlopen time. This compatibility layer exports those symbols so Mesa can load
+# inside the app namespace.
 LOCAL_PATH := $(HERE_PATH)
 include $(CLEAR_VARS)
 LOCAL_MODULE := drm
-LOCAL_SRC_FILES := drm_stub.c
-LOCAL_LDFLAGS += -Wl,-soname,libdrm.so.2
+LOCAL_SRC_FILES := droidbridge_libdrm_compat.c
+LOCAL_LDLIBS := -ldl -llog
+LOCAL_LDFLAGS += -Wl,-soname,libdrm.so
 include $(BUILD_SHARED_LIBRARY)
 
 
@@ -302,3 +318,29 @@ include $(BUILD_SHARED_LIBRARY)
 
 
 # awt_headless cleanup removed: the old rm shell call breaks Windows ndk-build hosts.
+
+
+
+# App-local libcutils compatibility shim for Mesa builds that retain
+# DT_NEEDED libcutils.so. Android app namespaces cannot link to the private
+# platform libcutils.so, so DroidBridge packages a tiny compatible subset.
+LOCAL_PATH := $(HERE_PATH)
+include $(CLEAR_VARS)
+LOCAL_MODULE := cutils
+LOCAL_SRC_FILES := droidbridge_libcutils_compat.cpp
+LOCAL_LDLIBS := -llog -ldl
+LOCAL_LDFLAGS += -Wl,-soname,libcutils.so
+include $(BUILD_SHARED_LIBRARY)
+
+
+# App-local libhardware compatibility shim for Mesa builds that retain
+# DT_NEEDED libhardware.so. Android app namespaces cannot link to the private
+# platform libhardware.so, so DroidBridge packages a tiny delegate/stub.
+LOCAL_PATH := $(HERE_PATH)
+include $(CLEAR_VARS)
+LOCAL_MODULE := hardware
+LOCAL_SRC_FILES := droidbridge_libhardware_compat.cpp
+LOCAL_LDLIBS := -ldl -llog
+LOCAL_LDFLAGS += -Wl,-soname,libhardware.so
+include $(BUILD_SHARED_LIBRARY)
+

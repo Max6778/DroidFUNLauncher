@@ -14,6 +14,7 @@ package ca.dnamobile.javalauncher.controls;
 
 import android.app.AlertDialog;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -83,6 +84,8 @@ public final class TouchControlsOverlay extends FrameLayout implements TouchCont
 
     private static final String TAG = "TouchControlsOverlay";
     private static final int MAX_EDIT_HISTORY = 4;
+    private static final String MOUSE_PASS_THROUGH_PREFS = "touch_control_mouse_pass_through";
+    private static final String SWIPE_GESTURE_PREFS = "touch_control_swipe_gesture";
 
     @NonNull private final ArrayDeque<String> undoHistory = new ArrayDeque<>();
     @NonNull private final ArrayDeque<String> redoHistory = new ArrayDeque<>();
@@ -187,6 +190,8 @@ public final class TouchControlsOverlay extends FrameLayout implements TouchCont
     private long lastHotbarTapTimeMs;
 
     @NonNull private final SparseArray<TouchControlButtonView> controlPointerTargets = new SparseArray<>();
+    @NonNull private final SparseArray<MousePassThroughState> mousePassThroughPointers = new SparseArray<>();
+    @NonNull private final SparseArray<SwipeGestureState> swipeGesturePointers = new SparseArray<>();
 
     private final Paint hotbarDebugFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint hotbarDebugStrokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -197,6 +202,30 @@ public final class TouchControlsOverlay extends FrameLayout implements TouchCont
     private final Paint virtualCursorStrokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint virtualCursorShadowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path virtualCursorPath = new Path();
+
+    private static final class MousePassThroughState {
+        final float downX;
+        final float downY;
+        float lastX;
+        float lastY;
+        boolean movedPastSlop;
+
+        MousePassThroughState(float x, float y) {
+            downX = x;
+            downY = y;
+            lastX = x;
+            lastY = y;
+        }
+    }
+
+    private static final class SwipeGestureState {
+        @NonNull final TouchControlButtonView primaryControl;
+        @Nullable TouchControlButtonView activeSwipeControl;
+
+        SwipeGestureState(@NonNull TouchControlButtonView primaryControl) {
+            this.primaryControl = primaryControl;
+        }
+    }
 
     public TouchControlsOverlay(@NonNull Context context) {
         super(context);
@@ -285,6 +314,16 @@ public final class TouchControlsOverlay extends FrameLayout implements TouchCont
         controlsVisible = visible;
         setVisibility(VISIBLE);
         applyControlsVisualState();
+    }
+
+    public void refreshButtonVisuals() {
+        for (int i = 0; i < getChildCount(); i++) {
+            View child = getChildAt(i);
+            if (child instanceof TouchControlButtonView) {
+                ((TouchControlButtonView) child).refreshVisualState();
+            }
+        }
+        postInvalidateOnAnimation();
     }
 
     public void toggleControlVisible() {
@@ -843,6 +882,8 @@ public final class TouchControlsOverlay extends FrameLayout implements TouchCont
 
             case MotionEvent.ACTION_MOVE:
                 dispatchActiveControlPointers(event, MotionEvent.ACTION_MOVE);
+                dispatchActiveSwipeGesturePointers(event);
+                dispatchActiveMousePassThroughPointers(event);
                 dispatchActiveHotbarPointer(event);
                 dispatchActiveCameraPointer(event);
                 dispatchActiveVirtualMousePointer(event);
@@ -859,6 +900,8 @@ public final class TouchControlsOverlay extends FrameLayout implements TouchCont
 
             case MotionEvent.ACTION_CANCEL:
                 dispatchCancelToControlPointers(event);
+                cancelAllSwipeGesturePointers(event);
+                cancelAllMousePassThroughPointers();
                 cancelCameraPointer(true);
                 cancelVirtualMousePointer();
                 dispatchActivePassthroughPointer(event, MotionEvent.ACTION_CANCEL);
@@ -888,6 +931,30 @@ public final class TouchControlsOverlay extends FrameLayout implements TouchCont
             return true;
         }
 
+        if (!editMode && event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+            // Android navigation Back / gesture Back is the recovery shortcut for the
+            // launcher in-game controls dialog. Do not forward it into Minecraft as
+            // Escape, otherwise Minecraft opens its own pause menu and users who hid
+            // the cog have no reliable way back to DroidBridge settings.
+            if (MinecraftGLSurface.shouldRouteBackKeyToMinecraft(event)) {
+                MinecraftGLSurface minecraftSurface = findMinecraftSurfaceTarget();
+                if (minecraftSurface != null && minecraftSurface.handleKeyEventFromActivity(event)) {
+                    return true;
+                }
+                if (passthroughTarget != null && passthroughTarget.dispatchKeyEvent(event)) {
+                    return true;
+                }
+            }
+
+            if (event.getAction() == KeyEvent.ACTION_UP) {
+                if (openLauncherInGameDialogFromBack()) {
+                    return true;
+                }
+            } else if (appMenuListener != null) {
+                return true;
+            }
+        }
+
         if (!editMode && MinecraftGLSurface.shouldRouteBackKeyToMinecraft(event)) {
             MinecraftGLSurface minecraftSurface = findMinecraftSurfaceTarget();
             if (minecraftSurface != null && minecraftSurface.handleKeyEventFromActivity(event)) {
@@ -898,6 +965,30 @@ public final class TouchControlsOverlay extends FrameLayout implements TouchCont
             }
         }
         return super.dispatchKeyEvent(event);
+    }
+
+    /**
+     * Opens the same launcher in-game controls dialog as the floating cog/touch menu.
+     * GameActivity can also call this from OnBackPressedDispatcher so Android 13+
+     * predictive/gesture Back is handled even when no View receives KEYCODE_BACK.
+     */
+    public boolean openLauncherInGameDialogFromBack() {
+        if (editMode || appMenuListener == null) return false;
+
+        hideKeySenderKeyboard();
+        cancelRuntimeTouchRoutingForLauncherDialog();
+
+        appMenuListener.onTouchControlsMenuRequested();
+        return true;
+    }
+
+    private void cancelRuntimeTouchRoutingForLauncherDialog() {
+        controlPointerTargets.clear();
+        swipeGesturePointers.clear();
+        cancelAllMousePassThroughPointers();
+        cancelCameraPointer(true);
+        cancelVirtualMousePointer();
+        clearRuntimeTouchRouting();
     }
 
     @Override
@@ -934,6 +1025,50 @@ public final class TouchControlsOverlay extends FrameLayout implements TouchCont
 
         view.setX(snapped[0]);
         view.setY(snapped[1]);
+    }
+
+    @Override
+    public void onResizeStarted(@NonNull TouchControlButtonView view, @NonNull TouchControlData data) {
+        pushUndoSnapshot();
+    }
+
+    @Override
+    public void onResizeRequested(
+            @NonNull TouchControlButtonView view,
+            @NonNull TouchControlData data,
+            float proposedScreenWidth,
+            float proposedScreenHeight
+    ) {
+        if (getWidth() <= 1 || getHeight() <= 1) return;
+
+        float left = view.getX();
+        float top = view.getY();
+        int minSize = Math.max(dp(32f), Math.round(32f * getResources().getDisplayMetrics().density));
+        int maxWidth = Math.max(minSize, Math.round(getWidth() - left));
+        int maxHeight = Math.max(minSize, Math.round(getHeight() - top));
+        int newWidth = Math.max(minSize, Math.min(maxWidth, Math.round(proposedScreenWidth)));
+        int newHeight = Math.max(minSize, Math.min(maxHeight, Math.round(proposedScreenHeight)));
+
+        LayoutMetrics metrics = layoutMetrics(getWidth(), getHeight());
+        float oldScreenWidth = Math.max(1f, view.getWidth());
+        float oldScreenHeight = Math.max(1f, view.getHeight());
+        float ratio = Math.min(newWidth / oldScreenWidth, newHeight / oldScreenHeight);
+
+        data.width = Math.max(24f, metrics.fromScreenWidth(newWidth));
+        data.height = Math.max(24f, metrics.fromScreenHeight(newHeight));
+        data.sizePercent = clamp(data.sizePercent * ratio, 30f, 250f);
+        data.rawX = null;
+        data.rawY = null;
+
+        ViewGroup.LayoutParams params = view.getLayoutParams();
+        if (params != null) {
+            params.width = newWidth;
+            params.height = newHeight;
+            view.setLayoutParams(params);
+        }
+        view.refreshVisualState();
+        view.requestLayout();
+        view.invalidate();
     }
 
     @Override
@@ -1362,6 +1497,26 @@ public final class TouchControlsOverlay extends FrameLayout implements TouchCont
                 || TouchControlData.shouldStayVisibleWhenControlsHiddenByDefault(data.action));
         layout.addView(visibleWhenControlsHidden);
 
+        CheckBox mousePassThrough = new CheckBox(context);
+        mousePassThrough.setText("Mouse pass through");
+        mousePassThrough.setTextColor(0xFFE0E0E0);
+        mousePassThrough.setChecked(isMousePassThroughEnabled(data));
+        layout.addView(mousePassThrough);
+
+        TextView mousePassThroughHint = valueLabel(context,
+                "When enabled, dragging on this button also moves the in-game camera while the button stays pressed. Useful for Jump, Sneak, Sprint, or Use.");
+        layout.addView(mousePassThroughHint);
+
+        CheckBox swipeGesture = new CheckBox(context);
+        swipeGesture.setText("Swipeable gesture");
+        swipeGesture.setTextColor(0xFFE0E0E0);
+        swipeGesture.setChecked(isSwipeGestureEnabled(data));
+        layout.addView(swipeGesture);
+
+        TextView swipeGestureHint = valueLabel(context,
+                "When enabled, sliding a finger from another held control onto this button presses it until the finger leaves. Useful for W + A/D strafing layouts.");
+        layout.addView(swipeGestureHint);
+
         CheckBox virtualMouse = new CheckBox(context);
         virtualMouse.setText("Show virtual cursor");
         virtualMouse.setTextColor(0xFFE0E0E0);
@@ -1483,6 +1638,12 @@ public final class TouchControlsOverlay extends FrameLayout implements TouchCont
             copy.label = data.label + " Copy";
             copy.x = data.x + 24f;
             copy.y = data.y + 24f;
+            if (isMousePassThroughEnabled(data)) {
+                setMousePassThroughEnabled(copy, true);
+            }
+            if (isSwipeGestureEnabled(data)) {
+                setSwipeGestureEnabled(copy, true);
+            }
             layoutData.controls.add(copy);
             accepted[0] = true;
             saveLayout();
@@ -1496,6 +1657,8 @@ public final class TouchControlsOverlay extends FrameLayout implements TouchCont
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(button -> {
                 pushUndoSnapshot(originalLayoutSnapshot);
                 deleted[0] = true;
+                setMousePassThroughEnabled(data, false);
+                setSwipeGestureEnabled(data, false);
                 layoutData.controls.remove(data);
                 saveLayout();
                 rebuildWhenSized();
@@ -1519,6 +1682,8 @@ public final class TouchControlsOverlay extends FrameLayout implements TouchCont
                 // Preserve exactly what the user typed in the Label field.
                 // Changing the binding should never rename an existing/custom button.
                 data.id = safeControlId(idField.getText() == null ? "" : idField.getText().toString());
+                setMousePassThroughEnabled(data, mousePassThrough.isChecked());
+                setSwipeGestureEnabled(data, swipeGesture.isChecked());
                 data.label = newLabel.trim().isEmpty() ? "Button" : newLabel.trim();
                 data.x = parseFloat(x, data.x);
                 data.y = parseFloat(y, data.y);
@@ -1787,6 +1952,14 @@ public final class TouchControlsOverlay extends FrameLayout implements TouchCont
 
         float fromScreenY(float screenY) {
             return screenY / (pixelCoordinates ? sizeScale : yScale);
+        }
+
+        float fromScreenWidth(float screenWidth) {
+            return screenWidth / sizeScale;
+        }
+
+        float fromScreenHeight(float screenHeight) {
+            return screenHeight / sizeScale;
         }
 
         float maxLayoutXUnits() {
@@ -2358,6 +2531,12 @@ public final class TouchControlsOverlay extends FrameLayout implements TouchCont
         if (control != null) {
             controlPointerTargets.put(pointerId, control);
             dispatchSinglePointerToControl(event, pointerIndex, MotionEvent.ACTION_DOWN, control);
+            if (grabbed) {
+                startSwipeGesturePointer(pointerId, control);
+                if (shouldUseMousePassThrough(control.getData())) {
+                    startMousePassThroughPointer(event, pointerIndex, pointerId);
+                }
+            }
             return true;
         }
 
@@ -2417,6 +2596,9 @@ public final class TouchControlsOverlay extends FrameLayout implements TouchCont
             finishVirtualMousePointer(event, pointerIndex, false);
         }
 
+        finishSwipeGesturePointer(event, pointerIndex, false);
+        finishMousePassThroughPointer(event, pointerIndex, false);
+
         if (pointerId == passthroughPointerId) {
             dispatchSinglePointerToPassthrough(event, pointerIndex, MotionEvent.ACTION_UP);
             passthroughPointerId = NO_POINTER_ID;
@@ -2459,6 +2641,271 @@ public final class TouchControlsOverlay extends FrameLayout implements TouchCont
         }
     }
 
+
+    private boolean shouldUseSwipeGesture(@NonNull TouchControlData data) {
+        if (!isSwipeGestureEnabled(data)) return false;
+        return !TouchControlActions.JOYSTICK.equals(data.action);
+    }
+
+    private boolean isSwipeGestureEnabled(@NonNull TouchControlData data) {
+        if (readSwipeGestureDataFlag(data)) return true;
+        return swipeGesturePrefs().getBoolean(swipeGesturePreferenceKey(data), false);
+    }
+
+    private void setSwipeGestureEnabled(@NonNull TouchControlData data, boolean enabled) {
+        writeSwipeGestureDataFlag(data, enabled);
+        SharedPreferences.Editor editor = swipeGesturePrefs().edit();
+        String key = swipeGesturePreferenceKey(data);
+        if (enabled) editor.putBoolean(key, true);
+        else editor.remove(key);
+        editor.apply();
+    }
+
+    @NonNull
+    private SharedPreferences swipeGesturePrefs() {
+        return getContext().getSharedPreferences(SWIPE_GESTURE_PREFS, Context.MODE_PRIVATE);
+    }
+
+    @NonNull
+    private static String swipeGesturePreferenceKey(@NonNull TouchControlData data) {
+        String id = data.id == null ? "" : data.id.trim();
+        if (id.isEmpty() || "null".equalsIgnoreCase(id)) {
+            id = data.label == null ? "button" : data.label.trim();
+        }
+        return "button." + id;
+    }
+
+    private static boolean readSwipeGestureDataFlag(@NonNull TouchControlData data) {
+        try {
+            java.lang.reflect.Field field = data.getClass().getField("swipeGesture");
+            return field.getBoolean(data);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static void writeSwipeGestureDataFlag(@NonNull TouchControlData data, boolean enabled) {
+        try {
+            java.lang.reflect.Field field = data.getClass().getField("swipeGesture");
+            field.setBoolean(data, enabled);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void startSwipeGesturePointer(int pointerId, @NonNull TouchControlButtonView primaryControl) {
+        swipeGesturePointers.put(pointerId, new SwipeGestureState(primaryControl));
+    }
+
+    private void dispatchActiveSwipeGesturePointers(@NonNull MotionEvent event) {
+        if (swipeGesturePointers.size() <= 0) return;
+        if (!updateMouseGrabState()) {
+            cancelAllSwipeGesturePointers(event);
+            return;
+        }
+
+        for (int i = 0; i < swipeGesturePointers.size(); i++) {
+            int pointerId = swipeGesturePointers.keyAt(i);
+            int pointerIndex = event.findPointerIndex(pointerId);
+            if (pointerIndex < 0) continue;
+            SwipeGestureState state = swipeGesturePointers.valueAt(i);
+            dispatchSwipeGesturePointerMove(event, pointerIndex, state);
+        }
+    }
+
+    private void finishSwipeGesturePointer(@NonNull MotionEvent event, int pointerIndex, boolean cancelled) {
+        if (pointerIndex < 0 || pointerIndex >= event.getPointerCount()) return;
+        int pointerId = event.getPointerId(pointerIndex);
+        SwipeGestureState state = swipeGesturePointers.get(pointerId);
+        if (state == null) return;
+
+        if (!cancelled && updateMouseGrabState()) {
+            dispatchSwipeGesturePointerMove(event, pointerIndex, state);
+        }
+        releaseActiveSwipeGestureControl(event, pointerIndex, state);
+        swipeGesturePointers.remove(pointerId);
+    }
+
+    private void dispatchSwipeGesturePointerMove(
+            @NonNull MotionEvent event,
+            int pointerIndex,
+            @NonNull SwipeGestureState state
+    ) {
+        if (pointerIndex < 0 || pointerIndex >= event.getPointerCount()) return;
+
+        float x = event.getX(pointerIndex);
+        float y = event.getY(pointerIndex);
+        TouchControlButtonView target = findSwipeGestureTargetUnder(x, y, state.primaryControl);
+
+        if (target == state.activeSwipeControl) {
+            if (target != null) {
+                dispatchSinglePointerToControl(event, pointerIndex, MotionEvent.ACTION_MOVE, target);
+            }
+            return;
+        }
+
+        releaseActiveSwipeGestureControl(event, pointerIndex, state);
+
+        if (target != null) {
+            state.activeSwipeControl = target;
+            dispatchSinglePointerToControl(event, pointerIndex, MotionEvent.ACTION_DOWN, target);
+        }
+    }
+
+    private void releaseActiveSwipeGestureControl(
+            @NonNull MotionEvent event,
+            int pointerIndex,
+            @NonNull SwipeGestureState state
+    ) {
+        TouchControlButtonView active = state.activeSwipeControl;
+        if (active == null) return;
+        dispatchSinglePointerToControl(event, pointerIndex, MotionEvent.ACTION_UP, active);
+        state.activeSwipeControl = null;
+    }
+
+    @Nullable
+    private TouchControlButtonView findSwipeGestureTargetUnder(float x, float y, @NonNull TouchControlButtonView primaryControl) {
+        for (int i = getChildCount() - 1; i >= 0; i--) {
+            View child = getChildAt(i);
+            if (!(child instanceof TouchControlButtonView)) continue;
+            if (child == primaryControl) continue;
+            if (child.getVisibility() != VISIBLE) continue;
+            if (x >= child.getX()
+                    && x <= child.getX() + child.getWidth()
+                    && y >= child.getY()
+                    && y <= child.getY() + child.getHeight()) {
+                TouchControlButtonView control = (TouchControlButtonView) child;
+                return shouldUseSwipeGesture(control.getData()) ? control : null;
+            }
+        }
+        return null;
+    }
+
+    private void cancelAllSwipeGesturePointers(@NonNull MotionEvent event) {
+        for (int i = 0; i < swipeGesturePointers.size(); i++) {
+            int pointerId = swipeGesturePointers.keyAt(i);
+            int pointerIndex = event.findPointerIndex(pointerId);
+            SwipeGestureState state = swipeGesturePointers.valueAt(i);
+            if (pointerIndex >= 0 && state != null) {
+                releaseActiveSwipeGestureControl(event, pointerIndex, state);
+            }
+        }
+        swipeGesturePointers.clear();
+    }
+
+
+    private boolean shouldUseMousePassThrough(@NonNull TouchControlData data) {
+        if (!isMousePassThroughEnabled(data)) return false;
+        return !TouchControlActions.JOYSTICK.equals(data.action);
+    }
+
+    private boolean isMousePassThroughEnabled(@NonNull TouchControlData data) {
+        if (readMousePassThroughDataFlag(data)) return true;
+        return mousePassThroughPrefs().getBoolean(mousePassThroughPreferenceKey(data), false);
+    }
+
+    private void setMousePassThroughEnabled(@NonNull TouchControlData data, boolean enabled) {
+        writeMousePassThroughDataFlag(data, enabled);
+        SharedPreferences.Editor editor = mousePassThroughPrefs().edit();
+        String key = mousePassThroughPreferenceKey(data);
+        if (enabled) editor.putBoolean(key, true);
+        else editor.remove(key);
+        editor.apply();
+    }
+
+    @NonNull
+    private SharedPreferences mousePassThroughPrefs() {
+        return getContext().getSharedPreferences(MOUSE_PASS_THROUGH_PREFS, Context.MODE_PRIVATE);
+    }
+
+    @NonNull
+    private static String mousePassThroughPreferenceKey(@NonNull TouchControlData data) {
+        String id = data.id == null ? "" : data.id.trim();
+        if (id.isEmpty() || "null".equalsIgnoreCase(id)) {
+            id = data.label == null ? "button" : data.label.trim();
+        }
+        return "button." + id;
+    }
+
+    private static boolean readMousePassThroughDataFlag(@NonNull TouchControlData data) {
+        try {
+            java.lang.reflect.Field field = data.getClass().getField("mousePassThrough");
+            return field.getBoolean(data);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static void writeMousePassThroughDataFlag(@NonNull TouchControlData data, boolean enabled) {
+        try {
+            java.lang.reflect.Field field = data.getClass().getField("mousePassThrough");
+            field.setBoolean(data, enabled);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void startMousePassThroughPointer(@NonNull MotionEvent event, int pointerIndex, int pointerId) {
+        if (pointerIndex < 0 || pointerIndex >= event.getPointerCount()) return;
+        float x = event.getX(pointerIndex);
+        float y = event.getY(pointerIndex);
+        mousePassThroughPointers.put(pointerId, new MousePassThroughState(x, y));
+    }
+
+    private void dispatchActiveMousePassThroughPointers(@NonNull MotionEvent event) {
+        if (mousePassThroughPointers.size() <= 0) return;
+        if (!updateMouseGrabState()) {
+            cancelAllMousePassThroughPointers();
+            return;
+        }
+
+        for (int i = 0; i < mousePassThroughPointers.size(); i++) {
+            int pointerId = mousePassThroughPointers.keyAt(i);
+            int pointerIndex = event.findPointerIndex(pointerId);
+            if (pointerIndex < 0) continue;
+            MousePassThroughState state = mousePassThroughPointers.valueAt(i);
+            dispatchMousePassThroughPointerMove(event, pointerIndex, state);
+        }
+    }
+
+    private void finishMousePassThroughPointer(@NonNull MotionEvent event, int pointerIndex, boolean cancelled) {
+        if (pointerIndex < 0 || pointerIndex >= event.getPointerCount()) return;
+        int pointerId = event.getPointerId(pointerIndex);
+        MousePassThroughState state = mousePassThroughPointers.get(pointerId);
+        if (state == null) return;
+
+        if (!cancelled && updateMouseGrabState()) {
+            dispatchMousePassThroughPointerMove(event, pointerIndex, state);
+        }
+        mousePassThroughPointers.remove(pointerId);
+    }
+
+    private void dispatchMousePassThroughPointerMove(
+            @NonNull MotionEvent event,
+            int pointerIndex,
+            @NonNull MousePassThroughState state
+    ) {
+        if (pointerIndex < 0 || pointerIndex >= event.getPointerCount()) return;
+
+        float x = event.getX(pointerIndex);
+        float y = event.getY(pointerIndex);
+        float dx = x - state.lastX;
+        float dy = y - state.lastY;
+        state.lastX = x;
+        state.lastY = y;
+
+        float totalDx = x - state.downX;
+        float totalDy = y - state.downY;
+        if (!state.movedPastSlop
+                && ((totalDx * totalDx) + (totalDy * totalDy)) > (cameraTouchSlop * cameraTouchSlop)) {
+            state.movedPastSlop = true;
+        }
+
+        if (!state.movedPastSlop || (dx == 0f && dy == 0f)) return;
+        sendRelativeCameraDelta(dx, dy);
+    }
+
+    private void cancelAllMousePassThroughPointers() {
+        mousePassThroughPointers.clear();
+    }
 
     private void startVirtualMousePointer(@NonNull MotionEvent event, int pointerIndex, int pointerId) {
         if (pointerIndex < 0 || pointerIndex >= event.getPointerCount()) return;
@@ -3002,6 +3449,7 @@ public final class TouchControlsOverlay extends FrameLayout implements TouchCont
             View child = getChildAt(i);
             if (child instanceof TouchControlButtonView) {
                 TouchControlButtonView button = (TouchControlButtonView) child;
+                button.refreshVisualState();
                 child.setVisibility(shouldShowControlButton(button.getData(), grabbed) ? VISIBLE : INVISIBLE);
             }
         }
@@ -3248,6 +3696,8 @@ public final class TouchControlsOverlay extends FrameLayout implements TouchCont
 
     private void clearRuntimeTouchRouting() {
         cancelCameraPointer(true);
+        swipeGesturePointers.clear();
+        cancelAllMousePassThroughPointers();
         finishHotbarPointer(false);
         cancelVirtualMousePointer();
         passthroughPointerId = NO_POINTER_ID;
@@ -3264,6 +3714,8 @@ public final class TouchControlsOverlay extends FrameLayout implements TouchCont
                 || hotbarPointerId != NO_POINTER_ID
                 || virtualMousePointerId != NO_POINTER_ID
                 || passthroughPointerId != NO_POINTER_ID
+                || swipeGesturePointers.size() > 0
+                || mousePassThroughPointers.size() > 0
                 || controlPointerTargets.size() > 0;
     }
 

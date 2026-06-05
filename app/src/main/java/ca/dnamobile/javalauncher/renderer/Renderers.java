@@ -53,7 +53,7 @@ public final class Renderers {
                 new GL4ESRenderer(),
                 new VulkanZinkRenderer(),
                 new VirGLRenderer(),
-                new FreedrenoRenderer(),
+                new DroidBridgeNativeGlfwKgslRenderer(),
                 new PanfrostRenderer()
         );
 

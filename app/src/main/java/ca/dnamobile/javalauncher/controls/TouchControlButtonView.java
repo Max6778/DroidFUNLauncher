@@ -45,6 +45,13 @@ final class TouchControlButtonView extends TextView {
                 float proposedX,
                 float proposedY
         );
+        void onResizeStarted(@NonNull TouchControlButtonView view, @NonNull TouchControlData data);
+        void onResizeRequested(
+                @NonNull TouchControlButtonView view,
+                @NonNull TouchControlData data,
+                float proposedScreenWidth,
+                float proposedScreenHeight
+        );
         void onEditRequested(@NonNull TouchControlButtonView view, @NonNull TouchControlData data);
         void onMenuRequested();
         void onToggleControlsRequested();
@@ -65,6 +72,8 @@ final class TouchControlButtonView extends TextView {
     private static final int GLFW_MOUSE_BUTTON_RIGHT = 1;
     private static final int GLFW_MOUSE_BUTTON_MIDDLE = 2;
 
+    private static final float GAME_PRESS_FEEDBACK_ALPHA = 0.50f;
+
     private final TouchControlData data;
     private final Listener listener;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -74,15 +83,23 @@ final class TouchControlButtonView extends TextView {
     private final Paint joystickStrokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint joystickKnobPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint joystickGuidePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint resizeHandlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint resizeHandleStrokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     private boolean editMode;
     private boolean pressedState;
     private boolean editLongPressTriggered;
     private boolean editDragging;
+    private boolean editResizing;
+    private boolean touchFeedbackActive;
     private float touchOffsetX;
     private float touchOffsetY;
     private float downRawX;
     private float downRawY;
+    private float resizeStartRawX;
+    private float resizeStartRawY;
+    private float resizeStartWidth;
+    private float resizeStartHeight;
     private Runnable editLongPressRunnable;
 
     private boolean joystickForwardLockDown;
@@ -112,6 +129,7 @@ final class TouchControlButtonView extends TextView {
         setLongClickable(true);
         setWillNotDraw(false);
         setupJoystickPaints();
+        setupResizeHandlePaints();
         resetJoystickKnob();
     }
 
@@ -123,7 +141,7 @@ final class TouchControlButtonView extends TextView {
     void refreshVisualState() {
         setText(data.label);
         setBackground(makeBackground(editMode));
-        setAlpha(resolvedDisplayAlpha());
+        updateInteractionAlpha();
         invalidate();
     }
 
@@ -139,6 +157,20 @@ final class TouchControlButtonView extends TextView {
         return editMode ? Math.max(0.25f, alpha) : alpha;
     }
 
+    private void updateInteractionAlpha() {
+        if (!editMode && touchFeedbackActive) {
+            setAlpha(GAME_PRESS_FEEDBACK_ALPHA);
+            return;
+        }
+        setAlpha(resolvedDisplayAlpha());
+    }
+
+    private void setTouchFeedbackActive(boolean active) {
+        if (touchFeedbackActive == active) return;
+        touchFeedbackActive = active;
+        updateInteractionAlpha();
+    }
+
     private void setupJoystickPaints() {
         joystickBasePaint.setColor(0x33000000);
         joystickBasePaint.setStyle(Paint.Style.FILL);
@@ -150,6 +182,14 @@ final class TouchControlButtonView extends TextView {
         joystickGuidePaint.setColor(0x66FFFFFF);
         joystickGuidePaint.setStyle(Paint.Style.STROKE);
         joystickGuidePaint.setStrokeWidth(1.25f * getResources().getDisplayMetrics().density);
+    }
+
+    private void setupResizeHandlePaints() {
+        resizeHandlePaint.setColor(0xAA25D380);
+        resizeHandlePaint.setStyle(Paint.Style.FILL);
+        resizeHandleStrokePaint.setColor(0xFFFFFFFF);
+        resizeHandleStrokePaint.setStyle(Paint.Style.STROKE);
+        resizeHandleStrokePaint.setStrokeWidth(1.5f * getResources().getDisplayMetrics().density);
     }
 
     private void resetJoystickKnob() {
@@ -171,6 +211,7 @@ final class TouchControlButtonView extends TextView {
     protected void onDraw(@NonNull Canvas canvas) {
         if (TouchControlActions.JOYSTICK.equals(data.action)) drawJoystick(canvas);
         super.onDraw(canvas);
+        if (editMode) drawResizeHandle(canvas);
     }
 
     private void drawJoystick(@NonNull Canvas canvas) {
@@ -188,6 +229,36 @@ final class TouchControlButtonView extends TextView {
         float knobY = joystickKnobY > 0f ? joystickKnobY : centerY;
         canvas.drawCircle(knobX, knobY, knobRadius, joystickKnobPaint);
         canvas.drawCircle(knobX, knobY, knobRadius, joystickStrokePaint);
+    }
+
+    private void drawResizeHandle(@NonNull Canvas canvas) {
+        float handle = resizeHandleSize();
+        float w = Math.max(1f, getWidth());
+        float h = Math.max(1f, getHeight());
+        android.graphics.Path path = new android.graphics.Path();
+        path.moveTo(w, h - handle);
+        path.lineTo(w, h);
+        path.lineTo(w - handle, h);
+        path.close();
+        canvas.drawPath(path, resizeHandlePaint);
+        canvas.drawPath(path, resizeHandleStrokePaint);
+
+        float inset = Math.max(3f, handle * 0.22f);
+        canvas.drawLine(w - inset, h - handle + inset, w - handle + inset, h - inset, resizeHandleStrokePaint);
+        canvas.drawLine(w - inset, h - (handle * 0.62f), w - (handle * 0.62f), h - inset, resizeHandleStrokePaint);
+    }
+
+    private boolean isInResizeHandle(float x, float y) {
+        float handle = resizeHandleHitSize();
+        return editMode && x >= getWidth() - handle && y >= getHeight() - handle;
+    }
+
+    private float resizeHandleSize() {
+        return Math.max(18f * getResources().getDisplayMetrics().density, Math.min(getWidth(), getHeight()) * 0.32f);
+    }
+
+    private float resizeHandleHitSize() {
+        return Math.max(28f * getResources().getDisplayMetrics().density, resizeHandleSize());
     }
 
     @Override
@@ -209,13 +280,30 @@ final class TouchControlButtonView extends TextView {
                 setPressed(true);
                 editLongPressTriggered = false;
                 editDragging = false;
+                editResizing = false;
                 touchOffsetX = event.getRawX() - getX();
                 touchOffsetY = event.getRawY() - getY();
                 downRawX = event.getRawX();
                 downRawY = event.getRawY();
-                scheduleEditLongPress();
+                if (isInResizeHandle(event.getX(), event.getY())) {
+                    editResizing = true;
+                    resizeStartRawX = event.getRawX();
+                    resizeStartRawY = event.getRawY();
+                    resizeStartWidth = getWidth();
+                    resizeStartHeight = getHeight();
+                    listener.onResizeStarted(this, data);
+                    return true;
+                }
+                // In the editor, a normal tap opens the edit dialog. Dragging still
+                // moves the control, and the bottom-right pull tab still resizes it.
                 return true;
             case MotionEvent.ACTION_MOVE:
+                if (editResizing) {
+                    float proposedWidth = resizeStartWidth + (event.getRawX() - resizeStartRawX);
+                    float proposedHeight = resizeStartHeight + (event.getRawY() - resizeStartRawY);
+                    listener.onResizeRequested(this, data, proposedWidth, proposedHeight);
+                    return true;
+                }
                 if (editLongPressTriggered) return true;
                 float dx = event.getRawX() - downRawX;
                 float dy = event.getRawY() - downRawY;
@@ -232,18 +320,25 @@ final class TouchControlButtonView extends TextView {
                 cancelEditLongPress();
                 setPressed(false);
                 requestParentDisallowIntercept(false);
-                if (editDragging && !editLongPressTriggered) {
+                if ((editDragging || editResizing) && !editLongPressTriggered) {
                     listener.onChanged();
                 }
+                editResizing = false;
                 return true;
             case MotionEvent.ACTION_UP:
                 cancelEditLongPress();
                 setPressed(false);
                 requestParentDisallowIntercept(false);
-                if (!editLongPressTriggered) {
-                    performClick();
+                boolean wasDragging = editDragging;
+                boolean wasResizing = editResizing;
+                if (wasDragging || wasResizing) {
                     listener.onChanged();
+                } else if (!editLongPressTriggered) {
+                    performClick();
+                    listener.onEditRequested(this, data);
                 }
+                editDragging = false;
+                editResizing = false;
                 return true;
             default:
                 return true;
@@ -281,24 +376,29 @@ final class TouchControlButtonView extends TextView {
         if (TouchControlActions.JOYSTICK.equals(data.action)) return handleJoystickTouch(event);
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
+                setTouchFeedbackActive(true);
                 if (TouchControlActions.MENU.equals(data.action)) {
                     listener.onMenuRequested();
                     performClick();
+                    clearTouchFeedbackSoon();
                     return true;
                 }
                 if (TouchControlActions.TOGGLE_CONTROLS.equals(data.action)) {
                     listener.onToggleControlsRequested();
                     performClick();
+                    clearTouchFeedbackSoon();
                     return true;
                 }
                 if (TouchControlActions.VIRTUAL_MOUSE.equals(data.action)) {
                     toggleVirtualMouse();
                     performClick();
+                    clearTouchFeedbackSoon();
                     return true;
                 }
                 if (TouchControlActions.KEY_SENDER_KEYBOARD.equals(data.action)) {
                     listener.onKeySenderKeyboardRequested();
                     performClick();
+                    clearTouchFeedbackSoon();
                     return true;
                 }
                 if (data.toggle) {
@@ -312,6 +412,7 @@ final class TouchControlButtonView extends TextView {
                 return true;
             case MotionEvent.ACTION_CANCEL:
             case MotionEvent.ACTION_UP:
+                setTouchFeedbackActive(false);
                 if (!data.toggle && pressedState) {
                     pressedState = false;
                     send(false);
@@ -327,6 +428,7 @@ final class TouchControlButtonView extends TextView {
     private boolean handleJoystickTouch(@NonNull MotionEvent event) {
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
+                setTouchFeedbackActive(true);
                 pressedState = true;
                 setActivated(true);
                 joystickCenterX = data.joystickAbsolute ? event.getX() : getWidth() / 2f;
@@ -339,6 +441,7 @@ final class TouchControlButtonView extends TextView {
             case MotionEvent.ACTION_CANCEL:
             case MotionEvent.ACTION_UP:
                 releaseJoystick();
+                setTouchFeedbackActive(false);
                 pressedState = false;
                 setActivated(false);
                 performClick();
@@ -396,8 +499,15 @@ final class TouchControlButtonView extends TextView {
         }
         editLongPressTriggered = false;
         editDragging = false;
+        editResizing = false;
+        touchFeedbackActive = false;
         setPressed(false);
         setActivated(false);
+        updateInteractionAlpha();
+    }
+
+    private void clearTouchFeedbackSoon() {
+        mainHandler.postDelayed(() -> setTouchFeedbackActive(false), 90L);
     }
 
     private void send(boolean down) {

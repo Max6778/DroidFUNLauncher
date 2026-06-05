@@ -17,12 +17,9 @@ import android.content.SharedPreferences;
 
 import androidx.annotation.NonNull;
 
-/**
- * Small Java-only settings store for launcher options that must be available before
- * GameActivity creates MinecraftGLSurface.
- */
 public final class LauncherPreferences {
     private static final String PREFS_NAME = "launcher_preferences";
+    private static final String RESOLUTION_PREFS_NAME = "launcher_resolution_preferences";
     private static final String KEY_USE_NATIVE_SURFACE_VIEW = "use_native_surface_view";
     private static final String KEY_SHOW_SHARED_INSTALLS = "show_shared_installs";
     private static final String KEY_SELECTED_INSTANCE_FILTER = "selected_instance_filter";
@@ -53,8 +50,27 @@ public final class LauncherPreferences {
     private LauncherPreferences() {
     }
 
+    @SuppressWarnings("deprecation")
     private static SharedPreferences prefs(@NonNull Context context) {
-        return context.getApplicationContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        return context.getApplicationContext().getSharedPreferences(
+                PREFS_NAME,
+                Context.MODE_PRIVATE | Context.MODE_MULTI_PROCESS
+        );
+    }
+
+    @SuppressWarnings("deprecation")
+    private static SharedPreferences resolutionPrefs(@NonNull Context context) {
+        return context.getApplicationContext().getSharedPreferences(
+                RESOLUTION_PREFS_NAME,
+                Context.MODE_PRIVATE | Context.MODE_MULTI_PROCESS
+        );
+    }
+
+    private static void saveBoolean(@NonNull Context context, @NonNull String key, boolean enabled) {
+        boolean saved = prefs(context).edit().putBoolean(key, enabled).commit();
+        if (!saved) {
+            prefs(context).edit().putBoolean(key, enabled).apply();
+        }
     }
 
     /**
@@ -68,7 +84,7 @@ public final class LauncherPreferences {
     }
 
     public static void setUseNativeSurfaceView(@NonNull Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(KEY_USE_NATIVE_SURFACE_VIEW, enabled).apply();
+        saveBoolean(context, KEY_USE_NATIVE_SURFACE_VIEW, enabled);
     }
 
     /**
@@ -80,7 +96,7 @@ public final class LauncherPreferences {
     }
 
     public static void setShowSharedInstalls(@NonNull Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(KEY_SHOW_SHARED_INSTALLS, enabled).apply();
+        saveBoolean(context, KEY_SHOW_SHARED_INSTALLS, enabled);
     }
 
     @NonNull
@@ -90,7 +106,7 @@ public final class LauncherPreferences {
     }
 
     public static void setSelectedInstanceFilter(@NonNull Context context, @NonNull String filter) {
-        prefs(context).edit().putString(KEY_SELECTED_INSTANCE_FILTER, filter).apply();
+        prefs(context).edit().putString(KEY_SELECTED_INSTANCE_FILTER, filter).commit();
     }
 
     public static void recordInstancePlayed(@NonNull Context context, @NonNull String instanceId) {
@@ -121,7 +137,7 @@ public final class LauncherPreferences {
     }
 
     public static void setRemoveInheritedVanillaAfterLoaderInstall(@NonNull Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(KEY_REMOVE_INHERITED_VANILLA_AFTER_LOADER_INSTALL, enabled).apply();
+        saveBoolean(context, KEY_REMOVE_INHERITED_VANILLA_AFTER_LOADER_INSTALL, enabled);
     }
 
     @NonNull
@@ -131,7 +147,7 @@ public final class LauncherPreferences {
     }
 
     public static void setSelectedRendererIdentifier(@NonNull Context context, @NonNull String rendererIdentifier) {
-        prefs(context).edit().putString(KEY_SELECTED_RENDERER_IDENTIFIER, rendererIdentifier).apply();
+        prefs(context).edit().putString(KEY_SELECTED_RENDERER_IDENTIFIER, rendererIdentifier).commit();
     }
 
     @NonNull
@@ -141,7 +157,7 @@ public final class LauncherPreferences {
     }
 
     public static void setSelectedVulkanDriverName(@NonNull Context context, @NonNull String driverName) {
-        prefs(context).edit().putString(KEY_SELECTED_VULKAN_DRIVER_NAME, driverName).apply();
+        prefs(context).edit().putString(KEY_SELECTED_VULKAN_DRIVER_NAME, driverName).commit();
     }
 
     /**
@@ -155,7 +171,29 @@ public final class LauncherPreferences {
     }
 
     public static void setUseSystemVulkanDriver(@NonNull Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(KEY_USE_SYSTEM_VULKAN_DRIVER, enabled).apply();
+        saveBoolean(context, KEY_USE_SYSTEM_VULKAN_DRIVER, enabled);
+    }
+
+    /**
+     * System Vulkan and forced 26+ OpenGL are mutually exclusive. Save both in
+     * one synchronous editor so GameActivity / launch code cannot read stale or
+     * contradictory values from another process.
+     */
+    public static void setSystemVulkanMode(@NonNull Context context, boolean enabled) {
+        SharedPreferences.Editor editor = prefs(context).edit()
+                .putBoolean(KEY_USE_SYSTEM_VULKAN_DRIVER, enabled);
+        if (enabled) {
+            editor.putBoolean(KEY_USE_OPENGL_FOR_MC_26_PLUS, false);
+        }
+        boolean saved = editor.commit();
+        if (!saved) {
+            SharedPreferences.Editor fallback = prefs(context).edit()
+                    .putBoolean(KEY_USE_SYSTEM_VULKAN_DRIVER, enabled);
+            if (enabled) {
+                fallback.putBoolean(KEY_USE_OPENGL_FOR_MC_26_PLUS, false);
+            }
+            fallback.apply();
+        }
     }
 
     /**
@@ -167,8 +205,22 @@ public final class LauncherPreferences {
     }
 
     public static void setUseOpenGlForMinecraft26Plus(@NonNull Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(KEY_USE_OPENGL_FOR_MC_26_PLUS, enabled).apply();
+        SharedPreferences.Editor editor = prefs(context).edit()
+                .putBoolean(KEY_USE_OPENGL_FOR_MC_26_PLUS, enabled);
+        if (enabled) {
+            editor.putBoolean(KEY_USE_SYSTEM_VULKAN_DRIVER, false);
+        }
+        boolean saved = editor.commit();
+        if (!saved) {
+            SharedPreferences.Editor fallback = prefs(context).edit()
+                    .putBoolean(KEY_USE_OPENGL_FOR_MC_26_PLUS, enabled);
+            if (enabled) {
+                fallback.putBoolean(KEY_USE_SYSTEM_VULKAN_DRIVER, false);
+            }
+            fallback.apply();
+        }
     }
+
     /**
      * Shows a small read-only latest-log overlay on the left side of GameActivity.
      * Disabled by default so normal gameplay remains clean.
@@ -178,7 +230,7 @@ public final class LauncherPreferences {
     }
 
     public static void setShowGameLogOverlay(@NonNull Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(KEY_SHOW_GAME_LOG_OVERLAY, enabled).apply();
+        saveBoolean(context, KEY_SHOW_GAME_LOG_OVERLAY, enabled);
     }
 
     /**
@@ -191,7 +243,7 @@ public final class LauncherPreferences {
     }
 
     public static void setShowInGameSettingsButton(@NonNull Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(KEY_SHOW_IN_GAME_SETTINGS_BUTTON, enabled).apply();
+        saveBoolean(context, KEY_SHOW_IN_GAME_SETTINGS_BUTTON, enabled);
     }
 
     /**
@@ -204,7 +256,7 @@ public final class LauncherPreferences {
     }
 
     public static void setSdlControllerModCompatEnabled(@NonNull Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(KEY_ENABLE_SDL_CONTROLLER_MOD_COMPAT, enabled).apply();
+        saveBoolean(context, KEY_ENABLE_SDL_CONTROLLER_MOD_COMPAT, enabled);
     }
 
     public static boolean isShowControllerModCompatWarnings(@NonNull Context context) {
@@ -212,33 +264,68 @@ public final class LauncherPreferences {
     }
 
     public static void setShowControllerModCompatWarnings(@NonNull Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(KEY_SHOW_CONTROLLER_MOD_COMPAT_WARNINGS, enabled).apply();
+        saveBoolean(context, KEY_SHOW_CONTROLLER_MOD_COMPAT_WARNINGS, enabled);
     }
-
 
     public static int getAllocatedMemoryMb(@NonNull Context context, int fallbackMb) {
         return prefs(context).getInt(KEY_ALLOCATED_MEMORY_MB, fallbackMb);
     }
 
     public static void setAllocatedMemoryMb(@NonNull Context context, int memoryMb) {
-        prefs(context).edit().putInt(KEY_ALLOCATED_MEMORY_MB, memoryMb).apply();
+        prefs(context).edit().putInt(KEY_ALLOCATED_MEMORY_MB, memoryMb).commit();
     }
-
 
     /**
      * Resolution scale applied to the game render buffer.
      * 100 = native device view size, 25 = quarter-size render buffer, 200 = double-size render buffer.
      */
     public static int getGameResolutionScalePercent(@NonNull Context context) {
-        return clampGameResolutionScalePercent(
-                prefs(context).getInt(KEY_GAME_RESOLUTION_SCALE_PERCENT, DEFAULT_GAME_RESOLUTION_SCALE_PERCENT)
+        SharedPreferences resolutionPreferences = resolutionPrefs(context);
+        if (resolutionPreferences.contains(KEY_GAME_RESOLUTION_SCALE_PERCENT)) {
+            return clampGameResolutionScalePercent(
+                    resolutionPreferences.getInt(
+                            KEY_GAME_RESOLUTION_SCALE_PERCENT,
+                            DEFAULT_GAME_RESOLUTION_SCALE_PERCENT
+                    )
+            );
+        }
+
+        int legacyValue = prefs(context).getInt(
+                KEY_GAME_RESOLUTION_SCALE_PERCENT,
+                DEFAULT_GAME_RESOLUTION_SCALE_PERCENT
         );
+        int clampedLegacyValue = clampGameResolutionScalePercent(legacyValue);
+        setGameResolutionScalePercent(context, clampedLegacyValue);
+        return clampedLegacyValue;
     }
 
     public static void setGameResolutionScalePercent(@NonNull Context context, int percent) {
-        prefs(context).edit()
-                .putInt(KEY_GAME_RESOLUTION_SCALE_PERCENT, clampGameResolutionScalePercent(percent))
-                .apply();
+        int clamped = clampGameResolutionScalePercent(percent);
+
+        // GameActivity runs in the :game process while LauncherSettingsActivity runs in
+        // the default app process. A normal SharedPreferences.apply() write can leave
+        // the other process holding its old cached value, which is why the settings
+        // screen could keep snapping the slider back to 70% after the in-game dialog
+        // had already saved 100%. Keep this specific setting in a tiny dedicated
+        // multi-process file and commit it synchronously so both processes see the
+        // latest render scale before creating/resizing MinecraftGLSurface.
+        boolean resolutionSaved = resolutionPrefs(context).edit()
+                .putInt(KEY_GAME_RESOLUTION_SCALE_PERCENT, clamped)
+                .commit();
+        boolean legacySaved = prefs(context).edit()
+                .putInt(KEY_GAME_RESOLUTION_SCALE_PERCENT, clamped)
+                .commit();
+
+        if (!resolutionSaved) {
+            resolutionPrefs(context).edit()
+                    .putInt(KEY_GAME_RESOLUTION_SCALE_PERCENT, clamped)
+                    .apply();
+        }
+        if (!legacySaved) {
+            prefs(context).edit()
+                    .putInt(KEY_GAME_RESOLUTION_SCALE_PERCENT, clamped)
+                    .apply();
+        }
     }
 
     public static int clampGameResolutionScalePercent(int percent) {
@@ -256,7 +343,7 @@ public final class LauncherPreferences {
     }
 
     public static void setForceFullscreenMode(@NonNull Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(KEY_FORCE_FULLSCREEN_MODE, enabled).apply();
+        saveBoolean(context, KEY_FORCE_FULLSCREEN_MODE, enabled);
     }
 
     /**
@@ -268,7 +355,7 @@ public final class LauncherPreferences {
     }
 
     public static void setAvoidRoundedDisplayCorners(@NonNull Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(KEY_AVOID_ROUNDED_DISPLAY_CORNERS, enabled).apply();
+        saveBoolean(context, KEY_AVOID_ROUNDED_DISPLAY_CORNERS, enabled);
     }
 
     /**
@@ -280,7 +367,7 @@ public final class LauncherPreferences {
     }
 
     public static void setIgnoreDisplayCutout(@NonNull Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(KEY_IGNORE_DISPLAY_CUTOUT, enabled).apply();
+        saveBoolean(context, KEY_IGNORE_DISPLAY_CUTOUT, enabled);
     }
 
     /**
@@ -293,7 +380,6 @@ public final class LauncherPreferences {
     }
 
     public static void setForceSdlControllerBridge(@NonNull Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(KEY_FORCE_SDL_CONTROLLER_BRIDGE, enabled).apply();
+        saveBoolean(context, KEY_FORCE_SDL_CONTROLLER_BRIDGE, enabled);
     }
-
 }
