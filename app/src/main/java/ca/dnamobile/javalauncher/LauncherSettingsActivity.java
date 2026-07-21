@@ -1,4 +1,4 @@
-/*
+⁶/*
  * Copyright (c) 2026 DNA Mobile Applications.
  * All rights reserved.
  *
@@ -1653,7 +1653,7 @@ public final class LauncherSettingsActivity extends AppCompatActivity {
     }
 
     private void showOfflineAccountsDialog() {
-        if (accountStore == null || !accountStore.hasMicrosoftLoginCompletedOnce()) {
+        if (accountStore == null || !(BuildConfig.DEBUG || accountStore.hasMicrosoftLoginCompletedOnce())) {
             new AlertDialog.Builder(this)
                     .setTitle(R.string.offline_locked_title)
                     .setMessage(R.string.offline_locked_message)
