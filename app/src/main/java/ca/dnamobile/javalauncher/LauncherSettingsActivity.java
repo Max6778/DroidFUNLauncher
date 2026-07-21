@@ -49,7 +49,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 import ca.dnamobile.javalauncher.auth.MicrosoftAuthConfigPersonal;
-import ca.dnamobile.javalauncher.BuildConfig;
 import ca.dnamobile.javalauncher.auth.MicrosoftAuthManagerPersonal;
 import ca.dnamobile.javalauncher.controls.ControlsActivity;
 import ca.dnamobile.javalauncher.controls.ControlsPreferences;
@@ -83,6 +82,10 @@ import ca.dnamobile.javalauncher.utils.path.PathManager;
 public final class LauncherSettingsActivity extends AppCompatActivity {
     private static final String SETTINGS_DEFAULTS_PREFS = "launcher_settings_defaults";
     private static final String SETTINGS_DEFAULTS_APPLIED_KEY = "settings_defaults_applied_2026_04_instances";
+    // Set to true before building a release, false while testing.
+// true  = offline accounts stay locked behind a real Microsoft sign-in (normal behavior)
+// false = offline accounts are unlocked immediately, no Microsoft login required
+private static final boolean REQUIRE_MICROSOFT_LOGIN = false;
 
     private ActivityLauncherSettingsBinding binding;
     private AccountStore accountStore;
@@ -1600,7 +1603,7 @@ public final class LauncherSettingsActivity extends AppCompatActivity {
 
     private void updateAccountStatus(@Nullable AccountStore.Account account) {
         boolean hasRememberedMicrosoft = accountStore != null && accountStore.hasStoredMicrosoftAccount();
-        boolean offlineUnlocked = accountStore != null && accountStore.hasMicrosoftLoginCompletedOnce();
+        boolean offlineUnlocked = accountStore != null && (!REQUIRE_MICROSOFT_LOGIN || accountStore.hasMicrosoftLoginCompletedOnce());
         boolean activeOffline = account != null && account.isOfflineAccount();
         boolean activeMicrosoft = account != null && account.isMicrosoftAccount();
 
@@ -1653,7 +1656,7 @@ public final class LauncherSettingsActivity extends AppCompatActivity {
     }
 
     private void showOfflineAccountsDialog() {
-        if (accountStore == null || !(BuildConfig.DEBUG || accountStore.hasMicrosoftLoginCompletedOnce())) {
+        if (accountStore == null || !(!REQUIRE_MICROSOFT_LOGIN || accountStore.hasMicrosoftLoginCompletedOnce())) {
             new AlertDialog.Builder(this)
                     .setTitle(R.string.offline_locked_title)
                     .setMessage(R.string.offline_locked_message)
