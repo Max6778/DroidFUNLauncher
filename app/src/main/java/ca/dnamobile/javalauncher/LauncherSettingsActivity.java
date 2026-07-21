@@ -49,6 +49,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import ca.dnamobile.javalauncher.auth.MicrosoftAuthConfigPersonal;
+import ca.dnamobile.javalauncher.BuildConfig;
 import ca.dnamobile.javalauncher.auth.MicrosoftAuthManagerPersonal;
 import ca.dnamobile.javalauncher.controls.ControlsActivity;
 import ca.dnamobile.javalauncher.controls.ControlsPreferences;
@@ -397,7 +398,7 @@ public final class LauncherSettingsActivity extends AppCompatActivity {
     }
 
     private void updateSkinUi(@Nullable AccountStore.Account account) {
-        boolean offlineUnlocked = accountStore != null && accountStore.hasMicrosoftLoginCompletedOnce();
+        boolean offlineUnlocked = accountStore != null && (BuildConfig.DEBUG || accountStore.hasMicrosoftLoginCompletedOnce());
         boolean activeOfflineSkin = account != null && account.isOfflineAccount() && account.hasOfflineSkin();
         boolean microsoftSkin = account != null && account.isMicrosoftAccount() && !isNullOrBlank(account.skinUrl);
         boolean rememberedMicrosoft = accountStore != null && accountStore.hasStoredMicrosoftAccount();
