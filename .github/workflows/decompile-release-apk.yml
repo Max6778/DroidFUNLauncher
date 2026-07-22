@@ -47,6 +47,7 @@ jobs:
           chmod +x jadx/bin/jadx
 
       - name: Decompile the APK with Jadx
+        continue-on-error: true
         run: |
           ./jadx/bin/jadx \
             --output-dir decompiled-output \
