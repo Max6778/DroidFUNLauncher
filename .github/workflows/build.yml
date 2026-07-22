@@ -33,8 +33,11 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
+      - name: List Gradle modules (diagnostic — check this if the build step below fails)
+        run: ./gradlew projects
+
       - name: Build debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew :app:assembleDebug --stacktrace
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -42,4 +45,3 @@ jobs:
           name: flintlauncher-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-
