@@ -22,18 +22,22 @@ jobs:
 
       - name: Download APK from the release
         run: |
-          curl -L \
-            -H "Accept: application/octet-stream" \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+          curl -fL \
             -o "$ASSET_NAME" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/download/${RELEASE_TAG}/${ASSET_NAME}"
+            "https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${ASSET_NAME}"
 
           echo "Downloaded:"
           ls -la "$ASSET_NAME"
 
-          # Sanity check — a failed download often silently saves an HTML
-          # error page instead of the APK, so make sure this is really a zip/APK.
-          file "$ASSET_NAME"
+          # Sanity check — a failed download can silently save an HTML
+          # error page instead of the APK, so make sure this is really a zip/APK
+          # before handing it to Jadx.
+          FILE_TYPE=$(file -b "$ASSET_NAME")
+          echo "Detected file type: $FILE_TYPE"
+          if ! echo "$FILE_TYPE" | grep -qi "zip\|android"; then
+            echo "This isn't a valid APK/zip — the download step got the wrong file."
+            exit 1
+          fi
 
       - name: Download Jadx
         run: |
@@ -55,4 +59,3 @@ jobs:
           name: flintlauncher-decompiled-sources
           path: decompiled-output
           if-no-files-found: error
-
