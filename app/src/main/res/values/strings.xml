@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DroidBridge Launcher</string>
+
+    <!-- Splash / install progress -->
+    <string name="splash_screen_checking">Checking installed components…</string>
+    <string name="splash_screen_checking_item">Checking %1$d/%2$d: %3$s</string>
+    <string name="splash_screen_installing_item">Installing %1$d/%2$d: %3$s</string>
+    <string name="splash_screen_finalizing">Finalizing setup…</string>
+    <string name="splash_screen_done">Ready</string>
+    <string name="splash_screen_failed">Setup failed: %1$s</string>
+    <string name="splash_screen_storage_unavailable">Storage is unavailable. Check your storage permissions and try again.</string>
+    <string name="splash_screen_components">Launcher Components</string>
+    <string name="splash_screen_authlib_injector">Authlib Injector</string>
+    <string name="splash_screen_cacio">Caciocavallo</string>
+    <string name="splash_screen_lwjgl">LWJGL</string>
+    <string name="splash_screen_jre_8">Java Runtime 8</string>
+    <string name="splash_screen_jre_17">Java Runtime 17</string>
+    <string name="splash_screen_jre_21">Java Runtime 21</string>
+    <string name="splash_screen_jre_25">Java Runtime 25</string>
+
+    <!-- Error screen -->
+    <string name="button_share_latest_log">Share Latest Log</string>
+
+    <!-- Storage locations -->
+    <string name="storage_locations_title">Storage Locations</string>
+    <string name="storage_locations_summary">Choose where DroidBridge Launcher keeps instances, mods, and game files.</string>
+    <string name="storage_locations_choose_title">Choose a storage location</string>
+    <string name="storage_locations_choose_summary">You can add additional folders and switch between them at any time.</string>
+    <string name="button_add_storage_location">Add Storage Location</string>
+    <string name="storage_location_delete_action">Remove this storage location</string>
+    <string name="storage_default_name">Default</string>
+    <string name="storage_scoped_name">Selected Folder</string>
+
+    <!-- Create instance dialog -->
+    <string name="create_instance_title">Create Instance</string>
+    <string name="create_instance_dialog_subtitle">Set up a new Minecraft instance.</string>
+    <string name="create_instance_select_icon">Select Icon</string>
+    <string name="create_instance_remove_icon">Remove Icon</string>
+    <string name="create_instance_name_label">Instance name</string>
+    <string name="create_instance_name_hint">e.g. Modded 1.21</string>
+    <string name="create_instance_name_already_exists">An instance named \"%1$s\" already exists.</string>
+    <string name="create_instance_version_type_label">Version type</string>
+    <string name="create_instance_game_version_label">Game version</string>
+    <string name="create_instance_game_version_summary">Select the Minecraft: Java Edition version for this instance.</string>
+    <string name="create_instance_no_versions">No versions available.</string>
+    <string name="create_instance_loader_label">Mod loader</string>
+    <string name="create_instance_loader_section_summary">Optionally install a mod loader for this instance.</string>
+    <string name="create_instance_loader_version_label">Loader version</string>
+    <string name="create_instance_loader_version_summary">Choose the loader version to install.</string>
+    <string name="create_instance_loader_version_vanilla">None (Vanilla)</string>
+    <string name="create_instance_loader_version_auto">Automatic (recommended)</string>
+    <string name="create_instance_loader_version_loading">Loading loader versions…</string>
+    <string name="create_instance_loader_version_loaded">%1$d loader versions found</string>
+    <string name="create_instance_loader_version_none">No %1$s loader versions found for %2$s.</string>
+    <string name="create_instance_loader_version_error">Could not load loader versions: %1$s</string>
+    <string name="create_instance_loader_version_selected">Selected: %1$s</string>
+    <string name="create_instance_loader_version_required">Choose a loader version to continue.</string>
+    <string name="create_instance_fabric_summary">Fabric is a lightweight, fast-updating mod loader.</string>
+    <string name="create_instance_forge_summary">Forge is a long-established mod loader with a large mod ecosystem.</string>
+    <string name="create_instance_neoforge_summary">NeoForge is a modern fork of Forge with ongoing active development.</string>
+    <string name="create_instance_isolated_checkbox">Isolate this instance</string>
+    <string name="create_instance_isolated_summary">Keep this instance\'s mods, resource packs, and worlds separate from other instances.</string>
+    <string name="create_instance_per_instance_summary">Settings for this instance can be changed later from its instance menu.</string>
+    <string name="create_instance_button">Create</string>
+
+    <!-- Instance list -->
+    <string name="instance_meta_value">Isolated</string>
+    <string name="instance_meta_shared_value">Shared</string>
+    <string name="instance_state_shared">Shared with other instances</string>
+    <string name="version_state_installed">Installed</string>
+    <string name="version_tab_release">Release</string>
+    <string name="version_tab_snapshot">Snapshot</string>
+    <string name="version_tab_beta">Beta</string>
+    <string name="version_tab_alpha">Alpha</string>
+</resources>
