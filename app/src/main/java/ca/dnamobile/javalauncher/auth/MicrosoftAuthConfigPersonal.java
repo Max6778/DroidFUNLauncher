@@ -16,7 +16,7 @@ public final class MicrosoftAuthConfigPersonal {
      * XboxLive.signin is requested directly at sign-in time via SCOPE below.
      * Paste the "Application (client) ID" from that registration here.
      */
-    public static final String CLIENT_ID = "YOUR_AZURE_APP_CLIENT_ID_HERE";
+    public static final String CLIENT_ID = "8ebf7217-c49e-431f-bd3d-ee7e9bd7c265";
 
     public static final String SCOPE = "XboxLive.signin offline_access";
 
