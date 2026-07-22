@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- app-private storage used for logs, exported worlds, screenshots, etc. -->
+    <files-path name="launcher_files" path="." />
+    <cache-path name="launcher_cache" path="." />
+    <external-files-path name="launcher_external_files" path="." />
+    <external-path name="launcher_external" path="." />
+</paths>
+
