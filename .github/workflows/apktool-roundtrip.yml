@@ -1,0 +1,125 @@
+name: Apktool Round-Trip (decompile + rebuild)
+
+# Manual only. Decompiles the release APK into smali + resources with
+# apktool, then rebuilds it straight back into an APK and signs it with a
+# throwaway debug key so it's actually installable for testing.
+#
+# This is a fundamentally different test than the javac/Jadx attempt:
+# apktool works on smali (a direct textual form of the real dex bytecode),
+# not a reconstructed-Java guess, so this round trip is expected to
+# actually succeed where javac recompilation didn't.
+
+on:
+  workflow_dispatch:
+
+env:
+  RELEASE_TAG: flintlauncher-v1.0
+  ASSET_NAME: FlintLauncher-1.0.apk
+  APKTOOL_VERSION: "2.9.3"
+
+jobs:
+  roundtrip:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK (for apksigner/zipalign)
+        uses: android-actions/setup-android@v3
+
+      - name: Accept SDK licenses and install build-tools
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "build-tools;34.0.0"
+
+      - name: Download APK from the release
+        run: |
+          curl -fL \
+            -o "$ASSET_NAME" \
+            "https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/${ASSET_NAME}"
+          echo "Downloaded:"
+          ls -la "$ASSET_NAME"
+          FILE_TYPE=$(file -b "$ASSET_NAME")
+          echo "Detected file type: $FILE_TYPE"
+          if ! echo "$FILE_TYPE" | grep -qi "zip\|android"; then
+            echo "This isn't a valid APK/zip — the download step got the wrong file."
+            exit 1
+          fi
+
+      - name: Download apktool
+        run: |
+          curl -fL -o apktool.jar \
+            "https://github.com/iBotPeaches/Apktool/releases/download/v${APKTOOL_VERSION}/apktool_${APKTOOL_VERSION}.jar"
+
+      - name: Decompile with apktool (smali + resources)
+        run: |
+          java -jar apktool.jar d "$ASSET_NAME" -o decoded-apk -f
+
+          echo "Decoded contents:"
+          ls decoded-apk
+          echo ""
+          echo "Smali file count:"
+          find decoded-apk -name "*.smali" | wc -l
+
+      - name: Rebuild the APK from the decoded smali/resources
+        id: rebuild
+        continue-on-error: true
+        run: |
+          java -jar apktool.jar b decoded-apk -o rebuilt-unsigned.apk
+
+      - name: Report rebuild result
+        run: |
+          if [ -f rebuilt-unsigned.apk ]; then
+            echo "Rebuild succeeded."
+            ls -la rebuilt-unsigned.apk
+          else
+            echo "Rebuild failed — no output APK was produced. Check the"
+            echo "'Rebuild the APK' step's log above for the actual apktool error."
+            exit 1
+          fi
+
+      - name: Generate a throwaway debug signing key
+        run: |
+          keytool -genkeypair -v \
+            -keystore debug.keystore \
+            -storepass android -keypass android \
+            -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Debug, OU=Debug, O=Debug, L=Debug, S=Debug, C=US"
+
+      - name: Align and sign the rebuilt APK
+        run: |
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/34.0.0"
+
+          "$BUILD_TOOLS/zipalign" -f -v 4 rebuilt-unsigned.apk rebuilt-aligned.apk
+
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks debug.keystore \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --ks-key-alias androiddebugkey \
+            --out rebuilt-signed.apk \
+            rebuilt-aligned.apk
+
+          echo "Signed APK:"
+          ls -la rebuilt-signed.apk
+
+      - name: Upload rebuilt + signed APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apktool-rebuilt-apk
+          path: rebuilt-signed.apk
+          if-no-files-found: warn
+
+      - name: Upload decoded smali/resources (for inspection)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apktool-decoded-source
+          path: decoded-apk
+          if-no-files-found: warn
