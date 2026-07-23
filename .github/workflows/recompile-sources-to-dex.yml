@@ -1,0 +1,132 @@
+name: Recompile Sources to DEX (best-effort test)
+
+# Manual only. Takes decompiled .java sources committed under
+# FlintLauncher/sources/, compiles them with javac against the Android SDK,
+# then converts the resulting .class files into classes.dex with d8.
+#
+# Heads up: this is a "how far can we get" test, not a guaranteed build.
+# Jadx output often doesn't compile cleanly (see the 36 decompile errors
+# from earlier) — javac WILL report errors, but this workflow keeps going
+# anyway and packages whatever .class files did successfully compile,
+# so you can see how much of it actually survives the round trip.
+
+on:
+  workflow_dispatch:
+
+env:
+  SOURCES_ZIP: FlintLauncher/sources.zip
+  SOURCES_DIR: FlintLauncher/sources
+  EXTRACTED_DIR: extracted-sources
+  ANDROID_PLATFORM: android-34   # adjust if you know your actual compileSdk
+
+jobs:
+  recompile:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept SDK licenses and install platform + build-tools
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "platforms;${ANDROID_PLATFORM}" "build-tools;34.0.0"
+
+      - name: Locate sources (zip preferred, folder as fallback)
+        id: locate
+        run: |
+          mkdir -p "$EXTRACTED_DIR"
+          if [ -f "$SOURCES_ZIP" ]; then
+            echo "Found $SOURCES_ZIP — extracting..."
+            unzip -q "$SOURCES_ZIP" -d "$EXTRACTED_DIR"
+            echo "resolved_dir=$EXTRACTED_DIR" >> "$GITHUB_OUTPUT"
+          elif [ -d "$SOURCES_DIR" ]; then
+            echo "No zip found, using existing folder: $SOURCES_DIR"
+            echo "resolved_dir=$SOURCES_DIR" >> "$GITHUB_OUTPUT"
+          else
+            echo "Neither $SOURCES_ZIP nor $SOURCES_DIR exist."
+            echo "Commit one of those first (the zip is much easier to upload"
+            echo "via GitHub's web UI than thousands of individual .java files)."
+            exit 1
+          fi
+
+      - name: Confirm sources exist
+        run: |
+          RESOLVED="${{ steps.locate.outputs.resolved_dir }}"
+          COUNT=$(find "$RESOLVED" -name "*.java" | wc -l)
+          echo "$COUNT .java files found in $RESOLVED"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "No .java files found — check the zip's internal folder structure."
+            exit 1
+          fi
+
+      - name: Build the list of source files
+        run: find "${{ steps.locate.outputs.resolved_dir }}" -name "*.java" > sources.list
+
+      - name: Compile with javac against android.jar
+        id: compile
+        continue-on-error: true
+        run: |
+          mkdir -p compiled-classes
+          ANDROID_JAR="$ANDROID_HOME/platforms/${ANDROID_PLATFORM}/android.jar"
+          javac \
+            -nowarn \
+            -Xmaxerrs 100000 \
+            -classpath "$ANDROID_JAR" \
+            -d compiled-classes \
+            @sources.list \
+            2> javac-errors.log
+          echo "javac exit code: $?"
+
+      - name: Show a summary of compile errors (expected — see workflow notes above)
+        run: |
+          ERROR_COUNT=$(grep -c "error:" javac-errors.log || true)
+          echo "javac reported $ERROR_COUNT errors."
+          echo "First 50 lines of errors:"
+          head -n 50 javac-errors.log || true
+
+          CLASS_COUNT=$(find compiled-classes -name "*.class" | wc -l)
+          echo ""
+          echo "$CLASS_COUNT .class files were still produced despite the errors above."
+
+      - name: Convert .class files to DEX with d8
+        if: always()
+        run: |
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/34.0.0"
+          CLASS_FILES=$(find compiled-classes -name "*.class")
+          if [ -z "$CLASS_FILES" ]; then
+            echo "No .class files were produced — nothing to convert."
+            exit 1
+          fi
+          mkdir -p dex-output
+          "$BUILD_TOOLS/d8" \
+            --output dex-output \
+            $CLASS_FILES
+
+          echo "Produced DEX files:"
+          ls -la dex-output
+
+      - name: Upload compile log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recompile-javac-errors-log
+          path: javac-errors.log
+          if-no-files-found: warn
+
+      - name: Upload resulting DEX files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recompiled-dex-output
+          path: dex-output
+          if-no-files-found: warn
