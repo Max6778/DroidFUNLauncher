@@ -1,9 +1,29 @@
-name: Decompile Release APK (Jadx test)
+name: Decompile Release APK (Jadx + native libs)
 
 # Manual only. Downloads the APK attached to a GitHub Release (instead of
-# a committed repo file) and decompiles it with Jadx.
+# a committed repo file), decompiles the dex (Java/Kotlin) side with Jadx,
+# and separately analyzes the native .so libraries under lib/<abi>/ --
+# Jadx only ever touches the dex bytecode, it has no idea the native
+# libraries even exist.
 on:
   workflow_dispatch:
+    inputs:
+      abi:
+        description: "Which lib/<abi> folder to pull native libraries from"
+        required: false
+        default: "arm64-v8a"
+      ghidra_targets:
+        description: >
+          Comma-separated .so filenames (no path) to run through Ghidra's
+          full headless decompiler for pseudo-C output. Keep this short --
+          each library can take several minutes. Leave empty to skip
+          Ghidra entirely and only get strings/symbols for every library.
+        required: false
+        default: ""
+      ghidra_version:
+        description: "Ghidra release version to use"
+        required: false
+        default: "11.2.1"
 
 env:
   RELEASE_TAG: flintlauncher-v1.0
@@ -29,15 +49,19 @@ jobs:
           echo "Downloaded:"
           ls -la "$ASSET_NAME"
 
-          # Sanity check — a failed download can silently save an HTML
+          # Sanity check -- a failed download can silently save an HTML
           # error page instead of the APK, so make sure this is really a zip/APK
           # before handing it to Jadx.
           FILE_TYPE=$(file -b "$ASSET_NAME")
           echo "Detected file type: $FILE_TYPE"
           if ! echo "$FILE_TYPE" | grep -qi "zip\|android"; then
-            echo "This isn't a valid APK/zip — the download step got the wrong file."
+            echo "This isn't a valid APK/zip -- the download step got the wrong file."
             exit 1
           fi
+
+      # ---------------------------------------------------------------
+      # Dex (Java/Kotlin) side -- Jadx
+      # ---------------------------------------------------------------
 
       - name: Download Jadx
         run: |
@@ -54,9 +78,160 @@ jobs:
             --no-res \
             "$ASSET_NAME"
 
-      - name: Upload decompiled source tree
+      # ---------------------------------------------------------------
+      # Native (.so) side -- extraction + strings/symbols for everything,
+      # full Ghidra headless decompile for the specifically requested ones
+      # ---------------------------------------------------------------
+
+      - name: Extract native libraries from the APK
+        run: |
+          mkdir -p native-libs native-analysis
+          unzip -q -o "$ASSET_NAME" "lib/${{ inputs.abi }}/*.so" -d extracted-apk || {
+            echo "No libraries found under lib/${{ inputs.abi }}/ -- check the abi input.";
+            exit 1;
+          }
+          cp extracted-apk/lib/${{ inputs.abi }}/*.so native-libs/
+          echo "Extracted libraries:"
+          ls -la native-libs/
+
+      - name: Install native analysis tools (binutils for ARM64, file)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq binutils-aarch64-linux-gnu file
+
+      - name: strings + symbol tables for every extracted library
+        run: |
+          for so in native-libs/*.so; do
+            name="$(basename "$so")"
+            echo "=== $name ==="
+
+            strings -a "$so" > "native-analysis/${name}.strings.txt"
+
+            # Dynamic (exported/imported) symbol table -- what this library
+            # exposes and what it expects to be resolved at load time.
+            aarch64-linux-gnu-nm -D --defined-only "$so" \
+              > "native-analysis/${name}.symbols-defined.txt" 2>&1 || true
+            aarch64-linux-gnu-nm -D --undefined-only "$so" \
+              > "native-analysis/${name}.symbols-undefined.txt" 2>&1 || true
+
+            aarch64-linux-gnu-file "$so" > "native-analysis/${name}.file-info.txt" 2>&1 || true
+          done
+          echo "Done. Per-library reports in native-analysis/"
+
+      - name: Download and set up Ghidra
+        if: ${{ inputs.ghidra_targets != '' }}
+        run: |
+          GHIDRA_VERSION="${{ inputs.ghidra_version }}"
+          GHIDRA_DATE="20241105"  # adjust if a given GHIDRA_VERSION uses a different build date
+          GHIDRA_ZIP="ghidra_${GHIDRA_VERSION}_PUBLIC_${GHIDRA_DATE}.zip"
+
+          echo "Fetching Ghidra release info for tag Ghidra_${GHIDRA_VERSION}_build..."
+          curl -fL -o ghidra.zip \
+            "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_${GHIDRA_VERSION}_build/${GHIDRA_ZIP}" \
+            || {
+              echo "Direct download failed -- Ghidra's asset filenames/build dates change per release.";
+              echo "Check https://github.com/NationalSecurityAgency/ghidra/releases for the exact asset name";
+              echo "matching ghidra_version='${GHIDRA_VERSION}' and adjust GHIDRA_DATE above.";
+              exit 1;
+            }
+          unzip -q ghidra.zip -d ghidra-install
+          GHIDRA_HOME="$(find ghidra-install -maxdepth 1 -type d -name 'ghidra_*')"
+          echo "GHIDRA_HOME=$GHIDRA_HOME" >> "$GITHUB_ENV"
+          chmod +x "$GHIDRA_HOME/support/analyzeHeadless"
+
+      - name: Write Ghidra decompile-all-functions script
+        if: ${{ inputs.ghidra_targets != '' }}
+        run: |
+          mkdir -p ghidra-scripts
+          cat > ghidra-scripts/DecompileAllFunctions.py << 'EOF'
+          # Ghidra headless post-script (Jython).
+          # Decompiles every defined function in the current program and
+          # writes the pseudo-C output to a single text file next to the
+          # library, named <library>.decompiled.c
+          from ghidra.app.decompiler import DecompInterface
+          from ghidra.util.task import ConsoleTaskMonitor
+          import os
+
+          program = currentProgram
+          out_dir = os.environ.get("GHIDRA_OUT_DIR", "/tmp")
+          out_path = os.path.join(out_dir, program.getName() + ".decompiled.c")
+
+          decompiler = DecompInterface()
+          decompiler.openProgram(program)
+          monitor = ConsoleTaskMonitor()
+
+          fm = program.getFunctionManager()
+          with open(out_path, "w") as f:
+              for func in fm.getFunctions(True):
+                  if func.isThunk() or func.isExternal():
+                      continue
+                  f.write("// ---- %s @ %s ----\n" % (func.getName(), func.getEntryPoint()))
+                  try:
+                      result = decompiler.decompileFunction(func, 60, monitor)
+                      if result and result.decompileCompleted():
+                          f.write(result.getDecompiledFunction().getC())
+                      else:
+                          f.write("// decompilation failed or timed out\n")
+                  except Exception as e:
+                      f.write("// exception during decompilation: %s\n" % e)
+                  f.write("\n\n")
+
+          print("Wrote decompiled output to " + out_path)
+          EOF
+
+      - name: Run Ghidra headless decompile on requested libraries
+        if: ${{ inputs.ghidra_targets != '' }}
+        run: |
+          mkdir -p ghidra-decompiled ghidra-project
+          IFS=',' read -ra TARGETS <<< "${{ inputs.ghidra_targets }}"
+          for target in "${TARGETS[@]}"; do
+            target="$(echo "$target" | xargs)"  # trim whitespace
+            so_path="native-libs/${target}"
+            if [ ! -f "$so_path" ]; then
+              echo "Requested target '$target' not found in native-libs/ -- skipping."
+              continue
+            fi
+            echo "=== Decompiling $target with Ghidra (this can take a while) ==="
+            GHIDRA_OUT_DIR="$(pwd)/ghidra-decompiled" \
+            "$GHIDRA_HOME/support/analyzeHeadless" \
+              "$(pwd)/ghidra-project" "GhidraProject_${target}" \
+              -import "$so_path" \
+              -postScript DecompileAllFunctions.py \
+              -scriptPath "$(pwd)/ghidra-scripts" \
+              -deleteProject
+          done
+          echo "Ghidra decompile results:"
+          ls -la ghidra-decompiled/ || echo "(no output produced)"
+
+      # ---------------------------------------------------------------
+      # Upload everything
+      # ---------------------------------------------------------------
+
+      - name: Upload decompiled dex source tree (Jadx)
         uses: actions/upload-artifact@v4
         with:
-          name: flintlauncher-decompiled-sources
+          name: decompiled-dex-sources
           path: decompiled-output
+          if-no-files-found: error
+
+      - name: Upload native library strings/symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-libs-analysis
+          path: native-analysis
+          if-no-files-found: error
+
+      - name: Upload Ghidra decompiled native libraries
+        if: ${{ inputs.ghidra_targets != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-libs-ghidra-decompiled
+          path: ghidra-decompiled
+          if-no-files-found: warn
+
+      - name: Upload extracted raw .so files
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-libs-raw
+          path: native-libs
           if-no-files-found: error
