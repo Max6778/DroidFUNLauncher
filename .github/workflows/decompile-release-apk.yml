@@ -122,20 +122,39 @@ jobs:
         if: ${{ inputs.ghidra_targets != '' }}
         run: |
           GHIDRA_VERSION="${{ inputs.ghidra_version }}"
-          GHIDRA_DATE="20241105"  # adjust if a given GHIDRA_VERSION uses a different build date
-          GHIDRA_ZIP="ghidra_${GHIDRA_VERSION}_PUBLIC_${GHIDRA_DATE}.zip"
+          RELEASE_TAG_G="Ghidra_${GHIDRA_VERSION}_build"
 
-          echo "Fetching Ghidra release info for tag Ghidra_${GHIDRA_VERSION}_build..."
-          curl -fL -o ghidra.zip \
-            "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_${GHIDRA_VERSION}_build/${GHIDRA_ZIP}" \
-            || {
-              echo "Direct download failed -- Ghidra's asset filenames/build dates change per release.";
-              echo "Check https://github.com/NationalSecurityAgency/ghidra/releases for the exact asset name";
-              echo "matching ghidra_version='${GHIDRA_VERSION}' and adjust GHIDRA_DATE above.";
-              exit 1;
-            }
+          echo "Looking up release assets for tag ${RELEASE_TAG_G}..."
+          ASSET_URL="$(curl -fsSL \
+            "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/tags/${RELEASE_TAG_G}" \
+            | jq -r '.assets[] | select(.name | test("^ghidra_.*_PUBLIC.*\\.zip$")) | .browser_download_url' \
+            | head -n1)"
+
+          if [ -z "$ASSET_URL" ]; then
+            echo "Could not find a matching .zip asset for tag ${RELEASE_TAG_G}."
+            echo "Check https://github.com/NationalSecurityAgency/ghidra/releases for the exact"
+            echo "tag/version and adjust ghidra_version accordingly."
+            exit 1
+          fi
+          echo "Resolved asset: $ASSET_URL"
+
+          # --retry: transient network failures on large downloads are common
+          # on hosted runners -- retry instead of failing the whole job.
+          curl -fL --retry 5 --retry-delay 10 --retry-connrefused \
+            -o ghidra.zip "$ASSET_URL"
+
+          # A truncated/corrupt download will fail `unzip -t` even if curl
+          # itself reported success -- catch that before wasting time on
+          # extraction.
+          echo "Verifying downloaded zip integrity..."
+          unzip -tq ghidra.zip > /dev/null
+
           unzip -q ghidra.zip -d ghidra-install
           GHIDRA_HOME="$(find ghidra-install -maxdepth 1 -type d -name 'ghidra_*')"
+          if [ -z "$GHIDRA_HOME" ]; then
+            echo "Extracted archive but couldn't find a ghidra_* directory inside it."
+            exit 1
+          fi
           echo "GHIDRA_HOME=$GHIDRA_HOME" >> "$GITHUB_ENV"
           chmod +x "$GHIDRA_HOME/support/analyzeHeadless"
 
@@ -183,12 +202,30 @@ jobs:
         if: ${{ inputs.ghidra_targets != '' }}
         run: |
           mkdir -p ghidra-decompiled ghidra-project
-          IFS=',' read -ra TARGETS <<< "${{ inputs.ghidra_targets }}"
+
+          IFS=',' read -ra RAW_TARGETS <<< "${{ inputs.ghidra_targets }}"
+          TARGETS=()
+          for t in "${RAW_TARGETS[@]}"; do
+            trimmed="$(echo "$t" | xargs)"  # trim whitespace
+            if [ -n "$trimmed" ]; then
+              TARGETS+=("$trimmed")
+            fi
+          done
+
+          echo "Parsed ${#TARGETS[@]} target(s) from ghidra_targets input:"
+          printf '  - %s\n' "${TARGETS[@]}"
+
+          if [ "${#TARGETS[@]}" -eq 0 ]; then
+            echo "No valid target filenames parsed from ghidra_targets -- nothing to decompile."
+            exit 1
+          fi
+
           for target in "${TARGETS[@]}"; do
-            target="$(echo "$target" | xargs)"  # trim whitespace
             so_path="native-libs/${target}"
             if [ ! -f "$so_path" ]; then
               echo "Requested target '$target' not found in native-libs/ -- skipping."
+              echo "Available libraries:"
+              ls native-libs/*.so | xargs -n1 basename
               continue
             fi
             echo "=== Decompiling $target with Ghidra (this can take a while) ==="
