@@ -195,17 +195,20 @@ jobs:
           print("Wrote decompiled output to " + out_path)
           EOF
 
-      - name: Run Ghidra headless decompile on all extracted libraries
+      - name: Run Ghidra headless decompile on DroidBridge libraries
         if: ${{ inputs.run_ghidra == true }}
         run: |
           mkdir -p ghidra-decompiled ghidra-project
 
+          # Only decompile the droidbridge_* libraries -- everything else
+          # (X11, Mesa, WebRTC, ONNX, Vulkan/GLES plumbing, etc.) is skipped
+          # since it's not code we own and would blow the 6h runner limit.
           shopt -s nullglob
-          TARGETS=(native-libs/*.so)
+          TARGETS=(native-libs/libdroidbridge*.so)
           shopt -u nullglob
 
           if [ "${#TARGETS[@]}" -eq 0 ]; then
-            echo "No .so files found in native-libs/ -- nothing to decompile."
+            echo "No libdroidbridge*.so files found in native-libs/ -- nothing to decompile."
             exit 1
           fi
 
