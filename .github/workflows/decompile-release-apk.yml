@@ -12,14 +12,11 @@ on:
         description: "Which lib/<abi> folder to pull native libraries from"
         required: false
         default: "arm64-v8a"
-      ghidra_targets:
-        description: >
-          Comma-separated .so filenames (no path) to run through Ghidra's
-          full headless decompiler for pseudo-C output. Keep this short --
-          each library can take several minutes. Leave empty to skip
-          Ghidra entirely and only get strings/symbols for every library.
+      run_ghidra:
+        description: "Run Ghidra's full headless decompiler (pseudo-C output) on every extracted native library"
         required: false
-        default: ""
+        type: boolean
+        default: false
       ghidra_version:
         description: "Ghidra release version to use"
         required: false
@@ -80,7 +77,7 @@ jobs:
 
       # ---------------------------------------------------------------
       # Native (.so) side -- extraction + strings/symbols for everything,
-      # full Ghidra headless decompile for the specifically requested ones
+      # full Ghidra headless decompile for all of them if run_ghidra is on
       # ---------------------------------------------------------------
 
       - name: Extract native libraries from the APK
@@ -119,7 +116,7 @@ jobs:
           echo "Done. Per-library reports in native-analysis/"
 
       - name: Download and set up Ghidra
-        if: ${{ inputs.ghidra_targets != '' }}
+        if: ${{ inputs.run_ghidra == true }}
         run: |
           GHIDRA_VERSION="${{ inputs.ghidra_version }}"
           RELEASE_TAG_G="Ghidra_${GHIDRA_VERSION}_build"
@@ -159,7 +156,7 @@ jobs:
           chmod +x "$GHIDRA_HOME/support/analyzeHeadless"
 
       - name: Write Ghidra decompile-all-functions script
-        if: ${{ inputs.ghidra_targets != '' }}
+        if: ${{ inputs.run_ghidra == true }}
         run: |
           mkdir -p ghidra-scripts
           cat > ghidra-scripts/DecompileAllFunctions.py << 'EOF'
@@ -198,36 +195,25 @@ jobs:
           print("Wrote decompiled output to " + out_path)
           EOF
 
-      - name: Run Ghidra headless decompile on requested libraries
-        if: ${{ inputs.ghidra_targets != '' }}
+      - name: Run Ghidra headless decompile on all extracted libraries
+        if: ${{ inputs.run_ghidra == true }}
         run: |
           mkdir -p ghidra-decompiled ghidra-project
 
-          IFS=',' read -ra RAW_TARGETS <<< "${{ inputs.ghidra_targets }}"
-          TARGETS=()
-          for t in "${RAW_TARGETS[@]}"; do
-            trimmed="$(echo "$t" | xargs)"  # trim whitespace
-            if [ -n "$trimmed" ]; then
-              TARGETS+=("$trimmed")
-            fi
-          done
-
-          echo "Parsed ${#TARGETS[@]} target(s) from ghidra_targets input:"
-          printf '  - %s\n' "${TARGETS[@]}"
+          shopt -s nullglob
+          TARGETS=(native-libs/*.so)
+          shopt -u nullglob
 
           if [ "${#TARGETS[@]}" -eq 0 ]; then
-            echo "No valid target filenames parsed from ghidra_targets -- nothing to decompile."
+            echo "No .so files found in native-libs/ -- nothing to decompile."
             exit 1
           fi
 
-          for target in "${TARGETS[@]}"; do
-            so_path="native-libs/${target}"
-            if [ ! -f "$so_path" ]; then
-              echo "Requested target '$target' not found in native-libs/ -- skipping."
-              echo "Available libraries:"
-              ls native-libs/*.so | xargs -n1 basename
-              continue
-            fi
+          echo "Will run Ghidra on ${#TARGETS[@]} librar(ies):"
+          printf '  - %s\n' "${TARGETS[@]##*/}"
+
+          for so_path in "${TARGETS[@]}"; do
+            target="$(basename "$so_path")"
             echo "=== Decompiling $target with Ghidra (this can take a while) ==="
             GHIDRA_OUT_DIR="$(pwd)/ghidra-decompiled" \
             "$GHIDRA_HOME/support/analyzeHeadless" \
@@ -259,7 +245,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Ghidra decompiled native libraries
-        if: ${{ inputs.ghidra_targets != '' }}
+        if: ${{ inputs.run_ghidra == true }}
         uses: actions/upload-artifact@v4
         with:
           name: native-libs-ghidra-decompiled
